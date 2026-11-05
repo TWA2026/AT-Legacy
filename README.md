@@ -1,6 +1,6 @@
 # AT Legacy Group
 
-Static website for AT Legacy Group LLC. It has no build step and no JavaScript.
+Static website for AT Legacy Group LLC. It has no page JavaScript. The build copies `site` to `dist`.
 
 ## Before you publish
 
@@ -13,7 +13,7 @@ Update the description in the two `<meta>` tags if you change the first line.
 
 ## Deploy on Slipway
 
-`slipway.yaml` publishes the `site` folder. Each push to `main` updates the site.
+Slipway runs `npm run build` and publishes `dist`. Each push to `main` updates the site.
 
 ## Connect your domain
 
@@ -34,4 +34,5 @@ Claim and verify the domain before adding `domain:` to `slipway.yaml`. A deploy 
 | `site/rings.svg` | Tree-ring artwork |
 | `site/favicon.svg` | Browser tab icon |
 | `site/fonts/` | Gloock and Hanken Grotesk, under the SIL Open Font License |
+| `package.json` | Build command |
 | `slipway.yaml` | Slipway deploy settings |

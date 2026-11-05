@@ -3,5 +3,7 @@ version: 1
 services:
   - name: at-legacy
     type: static
-    rootDir: site
-    publish: .
+    runtime: node
+    runtimeVersion: "22"
+    buildCommand: npm run build
+    publish: dist
