@@ -1,0 +1,7 @@
+version: 1
+
+services:
+  - name: at-legacy
+    type: static
+    rootDir: site
+    publish: .

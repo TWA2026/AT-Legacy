@@ -1,0 +1,138 @@
+@font-face {
+  font-family: "Gloock";
+  src: url("/fonts/gloock-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  src: url("/fonts/hanken-grotesk-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  --pine: #12352c;
+  --mist: #eef1e6;
+  --lichen: #b9c8b0;
+  --resin: #e0a93f;
+  --gutter: clamp(16px, 5vw, 72px);
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--pine);
+  color: var(--mist);
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+
+.page {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr auto auto;
+  gap: clamp(40px, 7vh, 80px);
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: clamp(32px, 7vh, 72px) var(--gutter) clamp(20px, 4vh, 36px);
+  overflow: hidden;
+}
+
+/* The rings sit off the right edge, behind everything else. */
+.rings {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: max(125vh, 760px);
+  max-width: none;
+  height: auto;
+  transform: translate(36%, -50%);
+  pointer-events: none;
+}
+
+.name,
+.details,
+.legal {
+  position: relative;
+}
+
+.name {
+  margin: 0;
+  font-family: "Gloock", Georgia, serif;
+  font-size: clamp(5.25rem, min(23vw, 20vh), 13.5rem);
+  font-weight: 400;
+  line-height: 0.96;
+  letter-spacing: -0.012em;
+}
+
+.name span {
+  display: block;
+}
+
+.name-small {
+  max-width: 11em;
+  font-size: clamp(3rem, 11vw, 6.5rem);
+  line-height: 1.04;
+}
+
+.details {
+  display: grid;
+  gap: 6px;
+  max-width: 34em;
+}
+
+.lede {
+  margin: 0;
+  color: var(--lichen);
+}
+
+.email {
+  width: fit-content;
+  max-width: 100%;
+  color: var(--mist);
+  font-family: "Gloock", Georgia, serif;
+  font-size: clamp(1.25rem, 6.4vw, 2.5rem);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+  text-decoration-color: var(--resin);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+}
+
+.email:hover {
+  color: var(--resin);
+}
+
+.email:focus-visible {
+  outline: 2px solid var(--resin);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+.legal {
+  color: var(--lichen);
+  font-size: 0.875rem;
+}
+
+/* On phones the ring centre moves up beside the name so the email stays clear. */
+@media (max-width: 640px) {
+  .rings {
+    top: 30%;
+    width: 170vw;
+    transform: translate(52%, -50%);
+  }
+}
