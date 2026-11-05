@@ -2,14 +2,12 @@
 
 Static website for AT Legacy Group LLC. It has no page JavaScript. The build copies `site` to `dist`.
 
-## Before you publish
+## Editing the site
 
-Edit `site/index.html`. Both spots are marked `EDIT`:
+- **Services and wording:** Edit `site/index.html`.
+- **Email:** Replace `hello@atlegacyllc.com` in both places on the line marked `EDIT`.
 
-1. Replace the placeholder line with what the company does.
-2. Replace `hello@atlegacygroup.com` in both places with your real address.
-
-Update the description in the two `<meta>` tags if you change the first line.
+Keep the wording inside the Florida handyman exemption. Don't describe the business as a contractor or as licensed, and don't list work that needs a permit or a trade license.
 
 ## Deploy on Slipway
 

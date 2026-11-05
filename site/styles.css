@@ -17,6 +17,8 @@
   --mist: #eef1e6;
   --lichen: #b9c8b0;
   --resin: #e0a93f;
+  --moss: #40594e;
+  --bark: #7a5212;
   --gutter: clamp(16px, 5vw, 72px);
   color-scheme: dark;
 }
@@ -126,6 +128,125 @@ body {
 .legal {
   color: var(--lichen);
   font-size: 0.875rem;
+}
+
+/* The home page hero is shorter so the services show the page continues. */
+.hero {
+  grid-template-rows: 1fr auto;
+  min-height: 90vh;
+  min-height: 90svh;
+  padding-bottom: clamp(32px, 6vh, 56px);
+}
+
+main {
+  padding-block: clamp(24px, 5vh, 48px);
+  background: var(--mist);
+  color: var(--pine);
+}
+
+h2,
+h3 {
+  margin: 0;
+  font-family: "Gloock", Georgia, serif;
+  font-weight: 400;
+  line-height: 1.12;
+}
+
+h2 {
+  font-size: clamp(2.25rem, 7vw, 3.25rem);
+  text-wrap: balance;
+}
+
+h3 {
+  font-size: 1.625rem;
+}
+
+.band {
+  display: grid;
+  gap: 28px;
+  padding: clamp(32px, 6vh, 56px) var(--gutter);
+}
+
+.columns {
+  display: grid;
+  gap: 40px;
+  margin: 0;
+  padding: 0;
+}
+
+.group p,
+.steps p {
+  margin: 6px 0 0;
+  color: var(--moss);
+}
+
+.group ul {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.group li {
+  padding: 10px 0;
+  border-top: 1px solid rgba(18, 53, 44, 0.2);
+}
+
+.steps {
+  counter-reset: step;
+  list-style: none;
+}
+
+.steps li {
+  counter-increment: step;
+}
+
+.steps li::before {
+  content: counter(step);
+  display: block;
+  margin-bottom: 8px;
+  color: var(--bark);
+  font-family: "Gloock", Georgia, serif;
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+.limits {
+  max-width: 38em;
+  margin: 0;
+}
+
+.contact {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+  padding: clamp(48px, 9vh, 88px) var(--gutter) clamp(20px, 4vh, 36px);
+}
+
+.contact p {
+  max-width: 34em;
+  margin: 0;
+  color: var(--lichen);
+}
+
+.contact .legal {
+  margin-top: clamp(40px, 8vh, 72px);
+}
+
+@media (min-width: 1000px) {
+  .band {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2.6fr);
+    gap: 48px;
+  }
+
+  .columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 /* On phones the ring centre moves up beside the name so the email stays clear. */
