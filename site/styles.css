@@ -212,7 +212,14 @@ h3 {
 
 .limits {
   max-width: 38em;
+}
+
+.limits p {
   margin: 0;
+}
+
+.limits p + p {
+  margin-top: 0.9em;
 }
 
 .contact {
