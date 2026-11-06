@@ -7,3 +7,4 @@ services:
     runtimeVersion: "22"
     buildCommand: npm run build
     publish: dist
+    domain: www.atlegacyllc.com
