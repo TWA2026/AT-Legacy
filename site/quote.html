@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Request a quote | AT Legacy Group LLC</title>
+  <meta name="description" content="Request a quote from AT Legacy Group for handyman service, property upkeep, or project cost help in the Tampa Bay area.">
+  <meta name="theme-color" content="#12352C">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="quote.js" defer></script>
+</head>
+<body>
+  <header class="quote-head">
+    <a class="home-link" href="index.html">AT Legacy Group</a>
+    <h1>Request a quote</h1>
+    <p>Answer a few questions and we&rsquo;ll put your request into an email for you. Nothing is sent until you press Send in your email app.</p>
+  </header>
+
+  <main class="quote-main">
+    <noscript>
+      <p class="form-note">This form needs JavaScript. You can email your request to <a href="mailto:hello@atlegacyllc.com?subject=Quote%20request">hello@atlegacyllc.com</a> instead.</p>
+    </noscript>
+
+    <!-- EDIT: to change where requests go, replace the address in data-email. -->
+    <form class="quote-form" id="quote-form" data-email="hello@atlegacyllc.com">
+      <section class="form-part" aria-labelledby="job-title">
+        <h2 id="job-title">The job</h2>
+        <div class="fields">
+          <div class="field wide">
+            <label for="service">What do you need?</label>
+            <select id="service" name="service" required>
+              <option value="">Choose a service</option>
+              <optgroup label="Home repairs">
+                <option>Drywall patch</option>
+                <option>Interior paint touch-up</option>
+                <option>Trim repair or caulking</option>
+                <option>Interior door adjustment</option>
+                <option>TV or shelf mounting</option>
+                <option>Furniture assembly</option>
+              </optgroup>
+              <optgroup label="Property upkeep">
+                <option>Pressure washing</option>
+                <option>Gutter cleaning</option>
+                <option>Yard cleanup</option>
+                <option>Rental move-out touch-ups</option>
+              </optgroup>
+              <optgroup label="Planning and sourcing">
+                <option>Materials list</option>
+                <option>Supplier price comparison</option>
+                <option>Quote review</option>
+                <option>Project cost tracking spreadsheet</option>
+                <option>Owner-builder permit help</option>
+              </optgroup>
+              <optgroup label="Other">
+                <option>Something else</option>
+              </optgroup>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="property">Property type</label>
+            <select id="property" name="property" required>
+              <option value="">Choose one</option>
+              <option>My home</option>
+              <option>My rental property</option>
+              <option>Other</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="county">County</label>
+            <select id="county" name="county" required>
+              <option value="">Choose one</option>
+              <option>Pasco</option>
+              <option>Hillsborough</option>
+              <option>Pinellas</option>
+              <option>Hernando</option>
+              <option>Other</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="location">City or ZIP code</label>
+            <input id="location" name="location" type="text" maxlength="60" required>
+          </div>
+
+          <div class="field">
+            <label for="timing">When do you need it done?</label>
+            <select id="timing" name="timing" required>
+              <option value="">Choose one</option>
+              <option>As soon as possible</option>
+              <option>Within 2 weeks</option>
+              <option>Within a month</option>
+              <option>I&rsquo;m flexible</option>
+            </select>
+          </div>
+
+          <div class="field wide">
+            <label for="budget">Budget <span class="optional">(optional)</span></label>
+            <select id="budget" name="budget">
+              <option value="">Choose one</option>
+              <option>Under $250</option>
+              <option>$250 to $500</option>
+              <option>$500 to $1,000</option>
+              <option>$1,000 to $2,500</option>
+              <option>Not sure</option>
+            </select>
+          </div>
+
+          <div class="field wide">
+            <label for="details">Describe the job</label>
+            <textarea id="details" name="details" rows="5" maxlength="1000" required></textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-part" aria-labelledby="contact-title">
+        <h2 id="contact-title">Your contact details</h2>
+        <div class="fields">
+          <div class="field wide">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" maxlength="80" autocomplete="name" required>
+          </div>
+
+          <div class="field">
+            <label for="phone">Phone</label>
+            <input id="phone" name="phone" type="tel" maxlength="30" autocomplete="tel" required>
+          </div>
+
+          <div class="field">
+            <label for="contact-method">Best way to reach you</label>
+            <select id="contact-method" name="contact" required>
+              <option value="">Choose one</option>
+              <option>Call</option>
+              <option>Text</option>
+              <option>Email</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <div class="form-end">
+        <p class="form-note">We don&rsquo;t do electrical, plumbing, HVAC, or structural work, or any job that needs a permit. Our jobs stay under $2,500 in total.</p>
+        <button class="primary" type="submit">Create my email</button>
+      </div>
+    </form>
+
+    <section class="quote-done" id="quote-done" tabindex="-1" hidden>
+      <h2>Your request is ready</h2>
+      <p>Your email app should open with everything filled in. Add photos if you have them, then press Send.</p>
+      <p>If it didn&rsquo;t open, use one of these options:</p>
+      <div class="done-actions">
+        <a class="primary" id="open-email" href="#">Open email again</a>
+        <button class="secondary" id="copy-request" type="button">Copy request</button>
+      </div>
+      <p>Copied requests can be pasted into an email to <span id="quote-address"></span>.</p>
+      <p class="copy-status" id="copy-status" role="status"></p>
+      <button class="text-button" id="edit-request" type="button">Change my answers</button>
+    </section>
+  </main>
+
+  <footer class="quote-foot legal">&copy; 2026 AT Legacy Group LLC</footer>
+</body>
+</html>

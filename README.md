@@ -1,11 +1,12 @@
 # AT Legacy Group
 
-Static website for AT Legacy Group LLC. It has no page JavaScript. The build copies `site` to `dist`.
+Static website for AT Legacy Group LLC. The only JavaScript is the quote form. The build copies `site` to `dist`.
 
 ## Editing the site
 
 - **Services and wording:** Edit `site/index.html`.
-- **Email:** Replace `hello@atlegacyllc.com` in both places on the line marked `EDIT`.
+- **Email:** Replace `hello@atlegacyllc.com` in `site/index.html` and `site/quote.html`. Each spot is marked `EDIT`, and `quote.html` also has the address in its no-JavaScript message.
+- **Quote form:** Edit the dropdown options in `site/quote.html`. `site/quote.js` writes the email.
 
 Keep the wording inside the Florida handyman exemption. Don't describe the business as a contractor or as licensed, and don't list work that needs a permit or a trade license.
 
@@ -27,6 +28,8 @@ Claim and verify the domain before adding `domain:` to `slipway.yaml`. A deploy 
 | Path | Purpose |
 | --- | --- |
 | `site/index.html` | Home page |
+| `site/quote.html` | Quote request form |
+| `site/quote.js` | Creates the quote email |
 | `site/404.html` | Page shown for a missing URL |
 | `site/styles.css` | Styles |
 | `site/rings.svg` | Tree-ring artwork |
