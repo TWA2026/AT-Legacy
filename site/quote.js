@@ -10,6 +10,16 @@
 
   document.getElementById("quote-address").textContent = address;
 
+  // Preselect the service when the link from the home page names one.
+  var requested = new URLSearchParams(window.location.search).get("service");
+  if (requested) {
+    Array.prototype.forEach.call(form.elements.service.options, function (option) {
+      if (option.text === requested) {
+        form.elements.service.value = option.value || option.text;
+      }
+    });
+  }
+
   function value(name) {
     return form.elements[name].value.trim();
   }

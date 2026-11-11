@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <circle cx="16" cy="16" r="16" fill="#12352C"/>
-  <circle cx="16" cy="16" r="12.5" stroke="#B9C8B0" stroke-width="1.5"/>
-  <circle cx="15.5" cy="16.5" r="7.5" stroke="#E0A93F" stroke-width="2"/>
-  <circle cx="15.5" cy="16.5" r="2.5" fill="#B9C8B0"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="2" y="2" width="96" height="96" rx="22" fill="#13283A"/>
+  <text x="50" y="58" text-anchor="middle" font-family="Rockwell, 'Roboto Slab', Georgia, serif" font-weight="900" font-size="44" fill="#F4F7F5">AT</text>
+  <path d="M20 74 q7.5 -6 15 0 t15 0 t15 0 t15 0" fill="none" stroke="#F2B544" stroke-width="5" stroke-linecap="round"/>
+  <path d="M20 85 q7.5 -6 15 0 t15 0 t15 0 t15 0" fill="none" stroke="#F2B544" stroke-width="5" stroke-linecap="round" opacity=".55"/>
 </svg>
