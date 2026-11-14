@@ -34,7 +34,16 @@ Claim and verify the domain before adding `domain:` to `slipway.yaml`. A deploy 
 | `site/quote.js` | Creates the quote email |
 | `site/404.html` | Page shown for a missing URL |
 | `site/styles.css` | Styles |
+| `site/home.js` | House picker, service links, and the phone quote bar on the home page |
+| `site/og.png` | Image shown when the site is shared in texts and social posts |
+| `site/robots.txt`, `site/sitemap.xml` | Search engine files |
 | `site/favicon.svg` | Browser tab icon and monogram (navy square, AT, gold waves) |
 | `site/fonts/` | Alfa Slab One and Public Sans, under the SIL Open Font License |
 | `package.json` | Build command |
 | `slipway.yaml` | Slipway deploy settings |
+
+## Sections waiting on real content
+
+- **Guarantee:** `styles.css` keeps the `.guarantee` band styles. Add the section back to `site/index.html` once the guarantee length is decided.
+- **Recent work:** `styles.css` keeps the `.work-grid` styles. Add the section back with real before-and-after photos.
+- **Reviews and phone number:** not on the site yet.

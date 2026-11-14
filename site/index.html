@@ -11,57 +11,159 @@
   <meta property="og:description" content="Repairs and upkeep for Tampa Bay homes and rentals. Written price before any work starts.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://atlegacyservices.com/">
+  <meta property="og:image" content="https://atlegacyservices.com/og.png">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="preload" href="fonts/alfa-slab-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
+  <script src="home.js" defer></script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "HomeAndConstructionBusiness",
+    "name": "AT Legacy Services",
+    "legalName": "AT Legacy Group LLC",
+    "url": "https://atlegacyservices.com/",
+    "email": "hello@atlegacyservices.com",
+    "description": "Home repairs and upkeep for Tampa Bay homes and rentals.",
+    "areaServed": ["Pasco County, FL", "Hillsborough County, FL", "Pinellas County, FL", "Hernando County, FL"]
+  }
+  </script>
 </head>
-<body>
-  <header class="hero">
-    <nav class="topbar" aria-label="Main">
-      <a class="brand" href="/">
-        <img src="favicon.svg" alt="" width="40" height="40">
-        <span>AT Legacy Services</span>
-      </a>
-      <div class="topbar-links">
-        <a class="topbar-link" href="#services">Services</a>
-        <a class="button button-small" href="quote.html">Request a quote</a>
-      </div>
+<body class="home">
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="site-head">
+    <a class="brand" href="/" aria-label="AT Legacy Services, home">
+      <img src="favicon.svg" alt="" width="44" height="44">
+      <span class="brand-text" aria-hidden="true">
+        <span class="brand-name">AT LEGACY</span>
+        <span class="brand-sub">SERVICES</span>
+      </span>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a href="#services">Services</a>
+      <a href="#florida">Florida wear</a>
+      <a href="#area">Service area</a>
+      <a href="#faq">FAQ</a>
     </nav>
+    <a class="button button-small" href="quote.html">Request a quote</a>
+  </header>
 
-    <div class="hero-body">
-      <h1 class="lockup" aria-label="AT Legacy Services">
-        <span class="lockup-name" aria-hidden="true">AT LEGACY</span>
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Repairs and upkeep for Tampa Bay homes and rentals.</h1>
         <span class="pinstripe" aria-hidden="true"></span>
-        <span class="lockup-sub" aria-hidden="true">SERVICES</span>
-      </h1>
-
-      <div class="details">
-        <p class="headline">Repairs and upkeep for Tampa Bay homes and rentals.</p>
         <p class="lede">Paint touch-ups, door fixes, mounting, assembly, and exterior upkeep. You get a written price before any work starts.</p>
-        <div class="actions">
+        <div class="actions" id="hero-actions">
           <a class="button" href="quote.html">Request a quote</a>
           <a class="plain-link" href="#services">See all services</a>
         </div>
         <p class="area">Serving Pasco, Hillsborough, Pinellas, and Hernando counties.</p>
       </div>
-    </div>
 
-    <div class="waves" aria-hidden="true"></div>
-  </header>
+      <div class="picker" id="picker">
+        <p class="picker-hint" id="picker-hint">Pick the part of the house that needs work.</p>
+        <div class="stage">
+          <svg class="house" viewBox="0 92 600 280" role="img" aria-label="Line drawing of a Florida house with a palm tree, front door, windows, gutter, walkway, and a rental sign.">
+            <g class="base">
+              <path class="ln" pathLength="1" d="M20 310H580"/>
+              <path class="ln" pathLength="1" d="M96 170 160 104H430L494 170Z"/>
+              <path class="ln" pathLength="1" d="M120 170V310"/>
+              <path class="ln" pathLength="1" d="M470 170V310"/>
+              <path class="ln" pathLength="1" d="M48 310C45 272 49 236 56 204"/>
+              <path class="ln" pathLength="1" d="M56 204C42 190 26 190 12 202"/>
+              <path class="ln" pathLength="1" d="M56 204C46 182 32 172 16 172"/>
+              <path class="ln" pathLength="1" d="M56 204C56 182 64 168 78 160"/>
+              <path class="ln" pathLength="1" d="M56 204C66 192 78 188 90 192"/>
+              <path class="ln" pathLength="1" d="M56 204C68 204 78 210 84 220"/>
+            </g>
+            <g data-part="exterior">
+              <path class="ln" pathLength="1" d="M100 178H490"/>
+              <path class="ln" pathLength="1" d="M479 178V298l8 8"/>
+              <path class="ln" pathLength="1" d="M270 310 236 364H354L320 310"/>
+              <path class="ln thin" pathLength="1" d="M295 312V364"/>
+              <path class="ln thin" pathLength="1" d="M264 322h26M256 335h34M248 348h42"/>
+            </g>
+            <g data-part="doors">
+              <rect class="ln" pathLength="1" x="270" y="218" width="50" height="92"/>
+              <rect class="ln thin" pathLength="1" x="278" y="227" width="34" height="30"/>
+              <rect class="ln thin" pathLength="1" x="278" y="265" width="34" height="36"/>
+              <circle class="dot" cx="314" cy="262" r="2.6"/>
+            </g>
+            <g data-part="mounting">
+              <rect class="ln" pathLength="1" x="150" y="205" width="90" height="60"/>
+              <path class="ln" pathLength="1" d="M144 269H246"/>
+              <rect class="ln thin" pathLength="1" x="170" y="217" width="50" height="29" rx="2"/>
+              <path class="ln thin" pathLength="1" d="M195 246v8M184 254h22"/>
+            </g>
+            <g data-part="paint">
+              <rect class="swath" x="336" y="186" width="30" height="92" rx="3"/>
+              <rect class="roller" x="332" y="274" width="38" height="12" rx="4"/>
+              <path class="ln thin" pathLength="1" d="M370 280h9v15h-28v11"/>
+              <rect class="ln" pathLength="1" x="384" y="205" width="62" height="60"/>
+              <path class="ln thin" pathLength="1" d="M415 205V265M384 235H446"/>
+              <path class="ln" pathLength="1" d="M378 269H452"/>
+            </g>
+            <g data-part="rentals">
+              <path class="ln" pathLength="1" d="M530 310V258"/>
+              <rect class="ln" pathLength="1" x="503" y="222" width="54" height="36" rx="2"/>
+              <text class="sign" x="530" y="237" text-anchor="middle">FOR</text>
+              <text class="sign" x="530" y="251" text-anchor="middle">RENT</text>
+            </g>
+          </svg>
+          <button class="spot" type="button" data-pick="paint" style="left:58.5%;top:43.9%" tabindex="-1" aria-hidden="true"></button>
+          <button class="spot" type="button" data-pick="doors" style="left:49.2%;top:68.9%" tabindex="-1" aria-hidden="true"></button>
+          <button class="spot" type="button" data-pick="mounting" style="left:32.5%;top:50%" tabindex="-1" aria-hidden="true"></button>
+          <button class="spot" type="button" data-pick="exterior" style="left:72%;top:30.7%" tabindex="-1" aria-hidden="true"></button>
+          <button class="spot" type="button" data-pick="rentals" style="left:88.3%;top:69.3%" tabindex="-1" aria-hidden="true"></button>
+        </div>
 
-  <main>
+        <div class="chips" role="group" aria-labelledby="picker-hint">
+          <button class="chip" type="button" data-pick="paint" aria-pressed="true">Walls</button>
+          <button class="chip" type="button" data-pick="doors" aria-pressed="false">Doors</button>
+          <button class="chip" type="button" data-pick="mounting" aria-pressed="false">TV and shelves</button>
+          <button class="chip" type="button" data-pick="exterior" aria-pressed="false">Outside</button>
+          <button class="chip" type="button" data-pick="rentals" aria-pressed="false">Rental</button>
+        </div>
+
+        <div class="pick-card" aria-live="polite">
+          <h2 class="pick-name" id="pick-name">Painting and caulking</h2>
+          <p id="pick-text">Paint touch-ups on walls, ceilings, and trim, plus fresh caulk along tubs and counters.</p>
+          <div class="pick-links">
+            <a class="button button-small" id="pick-quote" href="quote.html?service=Interior%20paint%20touch-up">Get a quote for this</a>
+            <a class="plain-link" id="pick-more" href="#svc-paint">What&rsquo;s included</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <ul class="promises">
+      <li>
+        <strong>Price in writing first</strong>
+        <span>You approve the quote before any work starts.</span>
+      </li>
+      <li>
+        <strong>Four counties covered</strong>
+        <span>Pasco, Hillsborough, Pinellas, and Hernando.</span>
+      </li>
+      <li>
+        <strong>One visit for the whole list</strong>
+        <span>Send every small job at once and we&rsquo;ll price them together.</span>
+      </li>
+    </ul>
+
     <section class="band services" id="services" aria-labelledby="services-title">
       <div class="band-intro">
         <h2 id="services-title">Services</h2>
         <p>Open a service to see what&rsquo;s included.</p>
+        <p class="not-offered">Not offered: electrical, plumbing, HVAC, roofing, structural, or permit work.</p>
       </div>
 
       <div class="service-list">
-        <details class="service">
-          <summary>
-            <span class="service-name">Painting and caulking</span>
-            <span class="toggle" aria-hidden="true"></span>
-          </summary>
+        <details class="service" id="svc-paint" name="service">
+          <summary><span class="service-name">Painting and caulking</span><span class="toggle" aria-hidden="true"></span></summary>
           <div class="service-body">
             <p>Clean, even finishes on the spots that show wear.</p>
             <ul>
@@ -73,11 +175,8 @@
           </div>
         </details>
 
-        <details class="service">
-          <summary>
-            <span class="service-name">Doors and small fixes</span>
-            <span class="toggle" aria-hidden="true"></span>
-          </summary>
+        <details class="service" id="svc-doors" name="service">
+          <summary><span class="service-name">Doors and small fixes</span><span class="toggle" aria-hidden="true"></span></summary>
           <div class="service-body">
             <p>The small annoyances that are easy to put off.</p>
             <ul>
@@ -89,11 +188,8 @@
           </div>
         </details>
 
-        <details class="service">
-          <summary>
-            <span class="service-name">Mounting and assembly</span>
-            <span class="toggle" aria-hidden="true"></span>
-          </summary>
+        <details class="service" id="svc-mounting" name="service">
+          <summary><span class="service-name">Mounting and assembly</span><span class="toggle" aria-hidden="true"></span></summary>
           <div class="service-body">
             <p>Mounted level and anchored for the load.</p>
             <ul>
@@ -105,11 +201,8 @@
           </div>
         </details>
 
-        <details class="service">
-          <summary>
-            <span class="service-name">Exterior upkeep</span>
-            <span class="toggle" aria-hidden="true"></span>
-          </summary>
+        <details class="service" id="svc-exterior" name="service">
+          <summary><span class="service-name">Exterior upkeep</span><span class="toggle" aria-hidden="true"></span></summary>
           <div class="service-body">
             <p>Keeps the outside looking cared for.</p>
             <ul>
@@ -121,11 +214,8 @@
           </div>
         </details>
 
-        <details class="service">
-          <summary>
-            <span class="service-name">Rental turnovers</span>
-            <span class="toggle" aria-hidden="true"></span>
-          </summary>
+        <details class="service" id="svc-rentals" name="service">
+          <summary><span class="service-name">Rental turnovers</span><span class="toggle" aria-hidden="true"></span></summary>
           <div class="service-body">
             <p>Gets a unit ready for the next tenant.</p>
             <ul>
@@ -137,6 +227,40 @@
           </div>
         </details>
       </div>
+    </section>
+
+    <section class="florida" id="florida" aria-labelledby="florida-title">
+      <div class="florida-intro">
+        <h2 id="florida-title">What Florida weather does to a house</h2>
+        <p>Heat, humidity, and rain wear on the same few spots every year. These are the ones we fix most.</p>
+      </div>
+      <ul class="wear">
+        <li>
+          <span class="wear-cause">Summer humidity</span>
+          <span class="wear-problem">Doors swell, stick, and stop latching.</span>
+          <a class="wear-fix" href="quote.html?service=Interior%20door%20adjustment">Door adjustment</a>
+        </li>
+        <li>
+          <span class="wear-cause">Heat and sun</span>
+          <span class="wear-problem">Caulk dries out and pulls away from tubs, counters, and trim.</span>
+          <a class="wear-fix" href="quote.html?service=Trim%20repair%20or%20caulking">Fresh caulk</a>
+        </li>
+        <li>
+          <span class="wear-cause">Rainy season</span>
+          <span class="wear-problem">Gutters fill with leaves and overflow at the roof edge.</span>
+          <a class="wear-fix" href="quote.html?service=Gutter%20cleaning">Gutter cleaning</a>
+        </li>
+        <li>
+          <span class="wear-cause">Shade and damp</span>
+          <span class="wear-problem">Algae and mildew darken driveways, walkways, and patios.</span>
+          <a class="wear-fix" href="quote.html?service=Pressure%20washing">Pressure washing</a>
+        </li>
+        <li>
+          <span class="wear-cause">Daily wear</span>
+          <span class="wear-problem">Paint scuffs and fades on walls, doors, and trim.</span>
+          <a class="wear-fix" href="quote.html?service=Interior%20paint%20touch-up">Paint touch-ups</a>
+        </li>
+      </ul>
     </section>
 
     <section class="band" aria-labelledby="steps-title">
@@ -157,21 +281,78 @@
       </ol>
     </section>
 
-    <section class="band" aria-labelledby="limits-title">
-      <h2 id="limits-title">What we don&rsquo;t do</h2>
-      <div class="limits">
-        <p>We don&rsquo;t do electrical, plumbing, HVAC, roofing, or structural work, or any job that needs a permit. AT Legacy Services is not a licensed contractor. If your job needs a licensed trade, we&rsquo;ll tell you up front.</p>
+
+
+    <section class="band area-band" id="area" aria-labelledby="area-title">
+      <div class="band-intro">
+        <h2 id="area-title">Service area</h2>
+        <p>Four counties around Tampa Bay. Not sure if you&rsquo;re covered? Put your ZIP code in the quote form.</p>
+      </div>
+      <ul class="counties">
+        <li><h3>Pasco</h3><p>Land O&rsquo; Lakes, Wesley Chapel, Odessa, Trinity, New Port Richey, Zephyrhills</p></li>
+        <li><h3>Hillsborough</h3><p>Tampa, Lutz, Carrollwood, Westchase, Brandon, Riverview</p></li>
+        <li><h3>Pinellas</h3><p>Clearwater, St. Petersburg, Largo, Palm Harbor, Dunedin</p></li>
+        <li><h3>Hernando</h3><p>Spring Hill, Brooksville</p></li>
+      </ul>
+    </section>
+
+    <section class="band faq-band" id="faq" aria-labelledby="faq-title">
+      <div class="band-intro">
+        <h2 id="faq-title">Questions</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>How do I get a price?</summary>
+          <p>Fill out the quote form and attach a few photos to the email it creates. We reply with a written price, and nothing starts until you approve it.</p>
+        </details>
+        <details>
+          <summary>Can you do several small jobs in one visit?</summary>
+          <p>Yes. List everything in the quote form and we&rsquo;ll price it as one visit.</p>
+        </details>
+        <details>
+          <summary>What jobs don&rsquo;t you take?</summary>
+          <p>Electrical, plumbing, HVAC, roofing, and structural work, and any job that needs a permit. If your job needs a licensed trade, we&rsquo;ll tell you up front.</p>
+        </details>
+        <details>
+          <summary>Are you a licensed contractor?</summary>
+          <p>No. Florida doesn&rsquo;t require a state contractor license for the jobs we take, such as painting, caulking, mounting, assembly, and pressure washing. We don&rsquo;t take work that does.</p>
+        </details>
+        <details>
+          <summary>Do you work on rental properties?</summary>
+          <p>Yes. We handle move-out touch-ups and punch lists for landlords and property managers.</p>
+        </details>
       </div>
     </section>
   </main>
 
-  <section class="contact" id="contact" aria-labelledby="contact-title">
-    <h2 id="contact-title">Get a quote</h2>
-    <p>Tell us about the job in a few quick steps.</p>
+  <footer class="contact" id="contact">
+    <div class="contact-main">
+      <p class="lockup" aria-hidden="true">
+        <span class="lockup-name">AT LEGACY</span>
+        <span class="pinstripe"></span>
+        <span class="lockup-sub">SERVICES</span>
+      </p>
+      <div class="contact-cta">
+        <h2>Get a quote</h2>
+        <p>Tell us about the job in a few quick steps.</p>
+        <a class="button" href="quote.html">Request a quote</a>
+        <!-- EDIT: to change the email, replace the address in both places on the next line. -->
+        <p>Prefer to write it yourself? Email <a class="plain-link" href="mailto:hello@atlegacyservices.com?subject=Quote%20request">hello@atlegacyservices.com</a>.</p>
+      </div>
+    </div>
+    <div class="foot">
+      <nav class="foot-nav" aria-label="Footer">
+        <a href="#services">Services</a>
+        <a href="#florida">Florida wear</a>
+        <a href="#area">Service area</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <p class="legal">&copy; 2026 AT Legacy Group LLC. AT Legacy Services is not a licensed contractor.</p>
+    </div>
+  </footer>
+
+  <div class="quote-bar" id="quote-bar" hidden>
     <a class="button" href="quote.html">Request a quote</a>
-    <!-- EDIT: to change the email, replace the address in both places on the next line. -->
-    <p>Prefer to write it yourself? Email <a class="plain-link" href="mailto:hello@atlegacyservices.com?subject=Quote%20request">hello@atlegacyservices.com</a>.</p>
-    <footer class="legal">&copy; 2026 AT Legacy Group LLC</footer>
-  </section>
+  </div>
 </body>
 </html>
