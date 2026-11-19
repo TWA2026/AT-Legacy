@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>For local companies | AT Legacy Services</title>
+  <meta name="description" content="Apply to receive quote requests from homeowners in Land O' Lakes and nearby Pasco County. No lead fees. A finder's fee only when you're hired.">
+  <meta name="theme-color" content="#13283A">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="partners.js" defer></script>
+</head>
+<body>
+  <header class="quote-head">
+    <a class="brand" href="/" aria-label="AT Legacy Services, home"><img src="favicon.svg" alt="" width="44" height="44"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>
+    <h1>Quote requests for local companies</h1>
+    <p>Homeowners send us one request. We pass it to one verified company in each price tier. If you&rsquo;re that company, you quote the job and deal with the customer directly.</p>
+  </header>
+
+  <main class="quote-main">
+    <ul class="partner-terms">
+      <li>
+        <strong>No lead fees</strong>
+        <span>You never pay to see a request or to quote.</span>
+      </li>
+      <li>
+        <strong>5% finder&rsquo;s fee when you&rsquo;re hired</strong>
+        <span>Based on the job total, and only on jobs you win.</span>
+      </li>
+      <li>
+        <strong>One company per tier</strong>
+        <span>You aren&rsquo;t bidding against five others for the same request.</span>
+      </li>
+    </ul>
+
+    <noscript>
+      <p class="form-note">This form needs JavaScript. You can email your details to <a href="mailto:hello@atlegacyservices.com?subject=Partner%20application">hello@atlegacyservices.com</a> instead.</p>
+    </noscript>
+
+    <form class="quote-form" id="partner-form" novalidate>
+      <section class="form-part" aria-labelledby="company-title">
+        <h2 id="company-title">Your company</h2>
+        <div class="fields">
+          <div class="field wide">
+            <label for="company">Company name</label>
+            <input id="company" name="company" type="text" maxlength="100" autocomplete="organization" required>
+          </div>
+
+          <div class="field">
+            <label for="trade">Main service</label>
+            <select id="trade" name="trade" required>
+              <option value="">Choose one</option>
+              <option>Pool</option>
+              <option>Pavers or patio</option>
+              <option>Fence</option>
+              <option>Outdoor lighting</option>
+              <option>Electrical work</option>
+              <option>Water softener</option>
+              <option>House cleaning</option>
+              <option>Lawn mowing</option>
+              <option>Lawn care and fertilizing</option>
+              <option>Lawn pest control</option>
+              <option>Something else</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="tier">Where your pricing usually lands</label>
+            <select id="tier" name="tier" required>
+              <option value="">Choose one</option>
+              <option>Affordable</option>
+              <option>Mid-range</option>
+              <option>Premium</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="years">Years in business</label>
+            <input id="years" name="years" type="text" inputmode="numeric" maxlength="3" required>
+          </div>
+
+          <div class="field">
+            <label for="license">State license number <span class="optional">(if needed)</span></label>
+            <input id="license" name="license" type="text" maxlength="40">
+          </div>
+
+          <div class="field">
+            <label for="insured">Liability insurance</label>
+            <select id="insured" name="insured" required>
+              <option value="">Choose one</option>
+              <option>Yes, I can send proof</option>
+              <option>Not yet</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="areas">Areas you serve</label>
+            <input id="areas" name="areas" type="text" maxlength="120" required>
+          </div>
+
+          <div class="field wide">
+            <label for="website">Website or social page <span class="optional">(optional)</span></label>
+            <input id="website" name="website" type="text" maxlength="120">
+          </div>
+        </div>
+      </section>
+
+      <section class="form-part" aria-labelledby="you-title">
+        <h2 id="you-title">Your contact details</h2>
+        <div class="fields">
+          <div class="field wide">
+            <label for="name">Name</label>
+            <input id="name" name="name" type="text" maxlength="80" autocomplete="name" required>
+          </div>
+          <div class="field">
+            <label for="phone">Phone</label>
+            <input id="phone" name="phone" type="tel" maxlength="30" autocomplete="tel" required>
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" maxlength="100" autocomplete="email" required>
+          </div>
+          <div class="honeypot" aria-hidden="true">
+            <label for="company-url">Leave this empty</label>
+            <input id="company-url" name="company_url" type="text" tabindex="-1" autocomplete="off">
+          </div>
+        </div>
+      </section>
+
+      <div class="form-end">
+        <p class="form-note">Before your first request we confirm your state registration, your license if your trade needs one, and your insurance.</p>
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+        <button class="primary" type="submit">Send my application</button>
+      </div>
+    </form>
+
+    <section class="quote-done" id="partner-done" tabindex="-1" hidden>
+      <h2>Application received</h2>
+      <p>Thanks. We&rsquo;ll confirm your registration, license, and insurance, then contact you before your first request.</p>
+      <a class="primary" href="/">Back to the home page</a>
+    </section>
+  </main>
+
+  <footer class="quote-foot legal">&copy; 2026 AT Legacy Group LLC</footer>
+</body>
+</html>

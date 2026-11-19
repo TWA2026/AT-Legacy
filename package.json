@@ -1,8 +1,18 @@
 {
   "name": "at-legacy-site",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "rm -rf dist && cp -r site dist"
+    "start": "node server/index.js",
+    "migrate": "node server/migrate.js",
+    "test": "node --test test/flow.test.js",
+    "build": "rm -rf dist && cp -r legacy-site dist"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
   }
 }

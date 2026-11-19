@@ -1,5 +1,20 @@
 version: 1
 
+# Two things run from this repo:
+#
+#   at-legacy  The current public site (static files in legacy-site/).
+#              It keeps serving atlegacyservices.com until the hub takes over.
+#   hub        The quote hub: public pages, request API, private quote pages,
+#              and the owner's dashboard, with its Postgres database.
+#
+# To move atlegacyservices.com to the hub, see "Switching the domain" in README.md.
+
+databases:
+  - name: db
+    engine: postgres
+    version: "18"
+    diskSizeGB: 1
+
 services:
   - name: at-legacy
     type: static
@@ -8,3 +23,21 @@ services:
     buildCommand: npm run build
     publish: dist
     domain: atlegacyservices.com
+
+  - name: hub
+    runtime: node
+    runtimeVersion: "22"
+    buildCommand: npm ci --omit=dev
+    command: ["node", "server/index.js"]
+    dependsOn: [db]
+    preDeploy: ["node", "server/migrate.js"]
+    ports:
+      - port: 3000
+        public: true
+    healthCheckPath: /healthz
+    cpu: 0.25
+    memory: 512MB
+    env:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: ${service.db.url}
