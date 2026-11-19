@@ -306,6 +306,101 @@ test("WorkOS sign-in replaces the password and admits only listed, verified emai
   }
 });
 
+test("the dashboard as its own service opens only behind the host's sign-in wall", async () => {
+  // What a stranger gets when they ask for the dashboard's public address.
+  let wall = "on";
+  const probes = [];
+  const edge = async (url) => {
+    probes.push(String(url));
+    if (wall === "unreachable") throw new Error("no route");
+    if (wall === "on") return new Response("", { status: 401 });
+    if (wall === "redirect") return new Response("", { status: 302, headers: { location: "https://signin.example.test/" } });
+    if (wall === "other page") return new Response("<html>hello</html>", { status: 200 });
+    return new Response("reachable", { status: 200, headers: { "x-atl-dashboard": "reachable" } });
+  };
+  const env = { ADMIN_PASSWORD: "", DASHBOARD_ONLY: "1", ADMIN_SIGNIN: "host", DASHBOARD_URL: "https://dash.example.test/" };
+  const dash = await start(env, edge);
+  const via = { "x-forwarded-host": "dash.example.test", "x-forwarded-for": "203.0.113.9" };
+
+  // Wall on: the host has signed the visitor in, so the dashboard opens and starts a session.
+  const first = await dash.get("/admin", via);
+  assert.equal(first.status, 200);
+  assert.deepEqual(probes, ["https://dash.example.test/admin/edge-check"]);
+  assert.match(first.headers.get("set-cookie"), /^atl_admin=.*; Secure/);
+  assert.doesNotMatch(await first.text(), /Log out/);
+  const cookie = first.headers.get("set-cookie").split(";")[0];
+
+  // Changes still need the form token that belongs to the session.
+  const formPage = await (await dash.get("/admin/partners/new", { ...via, cookie })).text();
+  const csrf = /name="csrf" value="([^"]+)"/.exec(formPage)[1];
+  const partner = { csrf, company: "Wall Test Co", contact_name: "Pat", trade: "Fence", tier: "Premium", status: "applied" };
+  assert.equal((await dash.form("/admin/partners", partner, { ...via, cookie })).status, 303);
+  assert.equal((await dash.form("/admin/partners", { ...partner, company: "Forged Co" }, via)).status, 403);
+  assert.equal((await pool.query("select count(*)::int as n from partners where company = 'Forged Co'")).rows[0].n, 0);
+  await pool.query("delete from partners where company = 'Wall Test Co'");
+
+  // A recent check is trusted for a signed-in session. A visitor without one is checked every time.
+  const before = probes.length;
+  assert.equal((await dash.get("/admin/fees", { ...via, cookie })).status, 200);
+  assert.equal(probes.length, before);
+  assert.equal((await dash.get("/admin", via)).status, 200);
+  assert.equal(probes.length, before + 1);
+
+  // The wall's other answer, a redirect to its login page, also counts.
+  wall = "redirect";
+  assert.equal((await dash.get("/admin", via)).status, 200);
+
+  // Wall off, unreachable, or an answer that isn't the wall's: locked, and no session is handed out.
+  for (const state of ["off", "unreachable", "other page"]) {
+    wall = state;
+    const locked = await dash.get("/admin", via);
+    assert.equal(locked.status, 503, state);
+    assert.equal(locked.headers.get("set-cookie"), null, state);
+    assert.match(await locked.text(), /sign-in wall/);
+  }
+  wall = "on";
+
+  // Only at its own address.
+  assert.equal((await dash.get("/admin", { ...via, "x-forwarded-host": "elsewhere.example.test" })).status, 503);
+  assert.equal((await dash.get("/admin")).status, 503);
+
+  // No login or logout pages, and nothing public is served here.
+  for (const path of ["/admin/login", "/admin/logout", "/admin/login/start"]) {
+    const response = await dash.get(path, via);
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), "/admin");
+  }
+  const home = await dash.get("/", via);
+  assert.equal(home.status, 302);
+  assert.equal(home.headers.get("location"), "/admin");
+  for (const path of ["/quote", "/quote.html", "/index.html", "/partners", "/quote.js", "/r/anything", "/q/anything", "/sitemap.xml"]) {
+    assert.equal((await dash.get(path, via)).status, 404, path);
+  }
+  assert.equal((await dash.json("/api/brief", JOB)).status, 404);
+  assert.equal((await dash.json("/api/requests", { ...JOB, ...CONTACT })).status, 404);
+  for (const path of ["/styles.css", "/app.js", "/favicon.svg", "/fonts/public-sans-latin-400-normal.woff2", "/healthz"]) {
+    assert.equal((await dash.get(path, via)).status, 200, path);
+  }
+
+  // The wall setting does nothing outside a dashboard-only service with an https address.
+  const publicSite = await start({ ADMIN_PASSWORD: "", ADMIN_SIGNIN: "host" }, edge);
+  const stillLocked = await publicSite.get("/admin", via);
+  assert.equal(stillLocked.status, 303);
+  assert.equal(stillLocked.headers.get("location"), "/admin/login");
+  const plainHttp = await start({ ...env, DASHBOARD_URL: "http://dash.example.test" }, edge);
+  assert.equal((await plainHttp.get("/admin", via)).headers.get("location"), "/admin/login");
+
+  // The public site sends the owner to the dashboard service when it has one.
+  const hub = await start({ DASHBOARD_URL: "https://dash.example.test" });
+  for (const path of ["/admin", "/admin/login", "/admin/requests/1"]) {
+    const response = await hub.get(path);
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get("location"), "https://dash.example.test/admin");
+  }
+  assert.equal((await hub.get("/")).status, 200);
+  assert.equal((await hub.form("/admin/login", { password: "correct horse" })).status, 302);
+});
+
 test("partner application and verification rules", async () => {
   const site = await start();
   const application = {

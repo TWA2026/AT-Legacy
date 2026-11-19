@@ -4,15 +4,17 @@ version: 1
 #
 #   at-legacy  The earlier public site (static files in legacy-site/).
 #              It serves atlegacyservices.com until the hub takes over.
-#   hub        The quote hub: public pages, request API, private quote pages,
-#              and the owner's dashboard.
+#   hub        The quote hub's public side: pages, request API, and the private
+#              quote pages for customers and partners.
+#   dashboard  The owner's dashboard. Same app, serving only /admin, behind
+#              Slipway's sign-in wall (auth: members).
 #
 # The hub's Postgres database is a managed database named "db" in the same
 # Slipway project. It is created in Slipway, not declared here.
 #
 # Slipway keeps its own copy of this spec for the project, and that copy is
-# what deploys. A change here needs the same change there. Custom domains are
-# also set in Slipway. See "Deploy on Slipway" in README.md.
+# what deploys. A change here needs the same change there. Custom domains and
+# the address settings (PUBLIC_URL, DASHBOARD_URL) are also set in Slipway. See "Deploy on Slipway" in README.md.
 
 services:
   - name: at-legacy
@@ -40,3 +42,24 @@ services:
       NODE_ENV: production
       PORT: "3000"
       DATABASE_URL: ${service.db.url}
+
+  - name: dashboard
+    rootDir: .
+    runtime: node
+    runtimeVersion: "22"
+    buildCommand: npm ci --omit=dev
+    command: ["node", "server/index.js"]
+    ports:
+      - port: 3000
+        public: true
+    healthCheckPath: /healthz
+    cpu: 100m
+    memory: 256Mi
+    auth:
+      members: true
+    env:
+      NODE_ENV: production
+      PORT: "3000"
+      DATABASE_URL: ${service.db.url}
+      DASHBOARD_ONLY: "1"
+      ADMIN_SIGNIN: host

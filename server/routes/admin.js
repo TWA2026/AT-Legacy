@@ -7,6 +7,7 @@ const {
   createLoginState, checkLoginState, stateCookie
 } = require("../lib/security");
 const { authorizationUrl, exchangeCode } = require("../lib/workos");
+const { createEdgeGuard, MARKER_HEADER, MARKER } = require("../lib/edge");
 
 const STATUS_LABELS = {
   new: "New", collecting: "Collecting quotes", chosen: "Company chosen", closed: "Closed",
@@ -32,7 +33,14 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
     next();
   });
 
-  const nav = '<nav class="app-nav" aria-label="Dashboard"><a href="/admin">Requests</a><a href="/admin/partners">Partners</a><a href="/admin/fees">Fees</a><a href="/admin/logout">Log out</a></nav>';
+  // With the host's sign-in wall in front, there is no login or logout here. See server/lib/edge.js.
+  const hostSignin = Boolean(config.hostSignin);
+  const wallIsUp = hostSignin ? createEdgeGuard({ url: config.dashboardUrl, fetchImpl }) : null;
+  const dashboardHost = hostSignin ? new URL(config.dashboardUrl).hostname : "";
+  const WALL_DOWN = "The dashboard is locked. It opens only at its own address, and only while the host\u2019s sign-in wall is on for this service (in Slipway: the service\u2019s Auth setting, Members).";
+
+  const nav = '<nav class="app-nav" aria-label="Dashboard"><a href="/admin">Requests</a><a href="/admin/partners">Partners</a><a href="/admin/fees">Fees</a>' +
+    (hostSignin ? "" : '<a href="/admin/logout">Log out</a>') + "</nav>";
 
   function adminPage(req, view) {
     return page({ wide: true, nav, ...view, body: view.body.replace(/__CSRF__/g, esc(csrfToken(secret, req.session))) });
@@ -46,7 +54,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   }
 
   // Cookies are HTTPS-only whenever the site is. PUBLIC_URL settles it when the host's proxy doesn't say.
-  const httpsSite = config.publicUrl.startsWith("https://");
+  const httpsSite = config.publicUrl.startsWith("https://") || hostSignin;
   function secureCookies(req) {
     return httpsSite || req.secure;
   }
@@ -89,6 +97,14 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       <button class="primary" type="submit">Log in</button>
     </form>`
     });
+  }
+
+  if (hostSignin) {
+    // What the wall check looks for. A stranger must never be able to reach this.
+    router.get("/edge-check", (req, res) => {
+      res.set(MARKER_HEADER, MARKER).type("text").send(MARKER);
+    });
+    router.all(["/login", "/login/start", "/callback", "/logout"], (req, res) => res.redirect(303, "/admin"));
   }
 
   router.get("/login", (req, res) => {
@@ -157,13 +173,28 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   });
 
   // Everything below needs a session, and every change needs the form token.
-  router.use((req, res, next) => {
-    req.session = readSession(secret, req.headers.cookie);
-    if (!req.session) return res.redirect(303, "/admin/login");
-    if (req.method === "POST" && !safeEqual(req.body.csrf || "", csrfToken(secret, req.session))) {
-      return res.status(403).send(adminPage(req, { title: "Try again", heading: "That form expired", body: '    <p>Go back, reload the page, and try again.</p>' }));
+  router.use(async (req, res, next) => {
+    try {
+      req.session = readSession(secret, req.headers.cookie);
+      if (hostSignin) {
+        // The wall has already signed this visitor in. Confirm the wall is there, then start a session.
+        const up = req.hostname === dashboardHost && await wallIsUp({ fresh: !req.session });
+        if (!up) return res.status(503).send(page({ title: "Locked", heading: "Dashboard", body: `    <p class="form-error" role="alert">${esc(WALL_DOWN)}</p>` }));
+        if (!req.session) {
+          const value = createSession(secret);
+          res.append("Set-Cookie", sessionCookie(value, secureCookies(req)));
+          req.session = readSession(secret, "atl_admin=" + value);
+        }
+      } else if (!req.session) {
+        return res.redirect(303, "/admin/login");
+      }
+      if (req.method === "POST" && !safeEqual(req.body.csrf || "", csrfToken(secret, req.session))) {
+        return res.status(403).send(adminPage(req, { title: "Try again", heading: "That form expired", body: '    <p>Go back, reload the page, and try again.</p>' }));
+      }
+      next();
+    } catch (error) {
+      next(error);
     }
-    next();
   });
 
   router.get("/", async (req, res, next) => {

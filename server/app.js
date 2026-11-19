@@ -4,9 +4,12 @@ const { page } = require("./lib/html");
 const { createNotifier } = require("./lib/notify");
 
 const SITE_DIR = path.join(__dirname, "..", "site");
+// The files a dashboard page loads: styles, the copy-button script, the icon, and fonts.
+const DASHBOARD_FILES = /^\/(?:styles\.css|app\.js|favicon\.svg|fonts\/[\w.-]+\.woff2)$/;
 
 function readConfig(env) {
   const fee = Number(env.FEE_PERCENT);
+  const dashboardUrl = (env.DASHBOARD_URL || "").replace(/\/+$/, "");
   return {
     adminPassword: env.ADMIN_PASSWORD || "",
     workosKey: env.WORKOS_API_KEY || "",
@@ -16,6 +19,11 @@ function readConfig(env) {
     aiModel: env.AI_MODEL || "",
     feePercent: Number.isFinite(fee) && fee >= 0 && fee <= 50 && env.FEE_PERCENT !== undefined && env.FEE_PERCENT !== "" ? fee : 5,
     publicUrl: (env.PUBLIC_URL || "").replace(/\/+$/, ""),
+    // The dashboard can run as its own service. See server/lib/edge.js.
+    dashboardOnly: env.DASHBOARD_ONLY === "1",
+    dashboardUrl,
+    // The host's sign-in wall guards the dashboard. Only honored on a dashboard-only service with an https address.
+    hostSignin: env.DASHBOARD_ONLY === "1" && env.ADMIN_SIGNIN === "host" && dashboardUrl.startsWith("https://"),
     resendKey: env.RESEND_API_KEY || "",
     notifyFrom: env.NOTIFY_FROM || "",
     notifyTo: env.NOTIFY_TO || ""
@@ -41,6 +49,16 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
     next();
   });
 
+  // Log once which address visitors use, as this app sees it through the host's proxy.
+  let addressLogged = false;
+  app.use((req, res, next) => {
+    if (!addressLogged && req.path !== "/healthz" && req.get("x-forwarded-for")) {
+      addressLogged = true;
+      console.log("Serving visitors at " + req.protocol + "://" + req.hostname);
+    }
+    next();
+  });
+
   app.get("/healthz", async (req, res) => {
     try {
       await pool.query("select 1");
@@ -50,22 +68,42 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
     }
   });
 
-  app.use("/api", require("./routes/public")(shared));
-
   // Private pages: never cached, never indexed.
   const privatePage = (req, res, next) => {
     res.set({ "Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow" });
     next();
   };
-  app.use("/r", privatePage, require("./routes/customer")(shared));
-  app.use("/q", privatePage, require("./routes/partner")(shared));
-  app.use("/admin", privatePage, require("./routes/admin")(shared));
 
-  app.use(express.static(SITE_DIR, { extensions: ["html"], maxAge: "10m" }));
+  if (config.dashboardOnly) {
+    // The dashboard service: the owner's pages and the few files they load. Nothing public.
+    app.get("/", (req, res) => res.redirect(302, "/admin"));
+    app.use("/admin", privatePage, require("./routes/admin")(shared));
+    const files = express.static(SITE_DIR, { index: false, maxAge: "10m" });
+    app.use((req, res, next) => (DASHBOARD_FILES.test(req.path) ? files(req, res, next) : next()));
+    app.use(privatePage, (req, res) => {
+      res.status(404).send(page({
+        title: "Page not found",
+        heading: "Page not found",
+        body: '    <p>This address only serves the dashboard. <a class="plain-link" href="/admin">Open the dashboard</a>.</p>'
+      }));
+    });
+  } else {
+    app.use("/api", require("./routes/public")(shared));
+    app.use("/r", privatePage, require("./routes/customer")(shared));
+    app.use("/q", privatePage, require("./routes/partner")(shared));
+    if (config.dashboardUrl) {
+      // The dashboard runs as its own service. Send the owner there.
+      app.use("/admin", privatePage, (req, res) => res.redirect(302, config.dashboardUrl + "/admin"));
+    } else {
+      app.use("/admin", privatePage, require("./routes/admin")(shared));
+    }
 
-  app.use((req, res) => {
-    res.status(404).sendFile(path.join(SITE_DIR, "404.html"));
-  });
+    app.use(express.static(SITE_DIR, { extensions: ["html"], maxAge: "10m" }));
+
+    app.use((req, res) => {
+      res.status(404).sendFile(path.join(SITE_DIR, "404.html"));
+    });
+  }
 
   app.use((error, req, res, next) => {
     console.error(req.method, req.path, "failed:", error.message);

@@ -2,7 +2,7 @@
 
 Homeowners describe a job once and get quotes from verified local companies in up to three tiers: Affordable, Mid-range, and Premium. AT Legacy Services (AT Legacy Group LLC) collects the quotes and earns a finder's fee from the company the customer hires.
 
-One Node service serves the public site, the request API, the private customer and partner pages, and the owner's dashboard. Data lives in Postgres.
+One Node app serves the public site, the request API, the private customer and partner pages, and the owner's dashboard. Data lives in Postgres. On Slipway the same app runs twice: once as the public site (`hub`) and once as the dashboard (`dashboard`), which sits behind Slipway's sign-in wall.
 
 ## How a request moves
 
@@ -38,6 +38,9 @@ Set these on the service's **Environment** tab in Slipway (see `.env.example`).
 | `FEE_PERCENT` | No | Finder's fee on new quote links. Defaults to 5 |
 | `PUBLIC_URL` | Recommended | The hub's public address, such as `https://atlegacyservices.com`. Used for the sign-in redirect, for links copied from the dashboard, and to keep sign-in cookies HTTPS-only. Defaults to the address you opened the dashboard on |
 | `RESEND_API_KEY`, `NOTIFY_FROM`, `NOTIFY_TO` | No | Emails you when a request or application arrives |
+| `DASHBOARD_URL` | With a dashboard service | The dashboard service's public address. On the public site, `/admin` redirects there |
+| `DASHBOARD_ONLY` | Dashboard service | `1` makes the app serve only `/admin` and the files it loads |
+| `ADMIN_SIGNIN` | Dashboard service | `host` means the host's sign-in wall is the login. Honored only with `DASHBOARD_ONLY=1` and an https `DASHBOARD_URL` |
 
 ## Run it locally
 
@@ -55,21 +58,32 @@ Open `http://localhost:3000`. The dashboard is at `/admin`.
 
 ## Deploy on Slipway
 
-The Slipway project runs three services. A push to `main` rebuilds `at-legacy` and `hub`.
+The Slipway project runs four services. A push to `main` rebuilds `at-legacy`, `hub`, and `dashboard`.
 
 | Service | What it is | Address |
 | --- | --- | --- |
 | `at-legacy` | The earlier public site, static files in `legacy-site/` | `atlegacyservices.com` until the switch below |
-| `hub` | The quote hub (this app) | Its own Slipway address until the switch below |
+| `hub` | The quote hub's public side (this app) | Its own Slipway address until the switch below |
+| `dashboard` | The owner's dashboard (this app with `DASHBOARD_ONLY=1`) | Its own Slipway address, behind Slipway sign-in |
 | `db` | Managed Postgres for the hub, with daily backups | Private |
 
 Slipway deploys from its own stored copy of the service spec, not from the `slipway.yaml` in this repo. The file here mirrors it. To add or change a service, change the stored spec in Slipway and keep `slipway.yaml` in step. The database was created in Slipway as a managed database named `db`, and the hub reads its address from `${service.db.url}`.
 
 Each `hub` deploy installs dependencies, runs `server/migrate.js` (safe to repeat, and it waits for the database on a first deploy), and starts `server/index.js`. The service is healthy when `/healthz` returns `ok`.
 
-The dashboard at `/admin` stays locked until a sign-in method is set on the `hub` service's **Environment** tab.
+### Dashboard sign-in with Slipway
 
-### Dashboard sign-in with WorkOS
+The `dashboard` service has Slipway's sign-in wall switched on (the service's **Auth** tab, **Members**). Slipway stops every visitor until they sign in with the GitHub account the Slipway workspace is connected to, so the app shows no login page of its own.
+
+The app trusts the wall only after checking it. Before it lets anyone in, it requests its own public address the way a stranger would (`server/lib/edge.js`). If that request reaches the app, the wall is off and the dashboard stays locked. It also refuses requests that arrive at any address other than `DASHBOARD_URL`.
+
+Settings on the `dashboard` service: `DASHBOARD_ONLY=1`, `ADMIN_SIGNIN=host`, `DASHBOARD_URL` (its own address), and `PUBLIC_URL` (the public site's address, used in the links you copy for customers and partners). On `hub`, `DASHBOARD_URL` makes `/admin` redirect to the dashboard.
+
+Anyone inside the Slipway workspace's GitHub account can open the dashboard. Requests from other services in the same Slipway project skip the wall, so run only trusted services in this project.
+
+### Dashboard sign-in with WorkOS (alternative)
+
+Without a dashboard service, the dashboard lives at `/admin` on `hub` and stays locked until a sign-in method is set there.
 
 1. Create a WorkOS account and open **Applications**. Under **Redirects**, add `https://<the hub's address>/admin/callback` (add the `atlegacyservices.com` one too before the domain switch).
 2. In Slipway, add `WORKOS_API_KEY` as a secret, and `WORKOS_CLIENT_ID`, `ADMIN_EMAILS`, and `PUBLIC_URL` as variables, on the `hub` service. Redeploy `hub` so they take effect.
@@ -84,7 +98,7 @@ WorkOS handles passwords, email verification, and two-factor codes. The app only
 1. Open `at-legacy`, go to **Networking**, change its address to the Slipway domain, and save. This frees `atlegacyservices.com`.
 2. Open `hub`, go to **Networking**, pick `atlegacyservices.com` in the **Address** row, and save.
 
-No DNS change is needed. Set `PUBLIC_URL` to `https://atlegacyservices.com` and redeploy `hub`. Afterwards, `legacy-site/`, the `at-legacy` service, and the `build` script can be removed.
+No DNS change is needed. Set `PUBLIC_URL` to `https://atlegacyservices.com` on both `hub` and `dashboard`, and redeploy them. Afterwards, `legacy-site/`, the `at-legacy` service, and the `build` script can be removed.
 
 ## Files
 
@@ -103,6 +117,7 @@ No DNS change is needed. Set `PUBLIC_URL` to `https://atlegacyservices.com` and 
 | `server/lib/brief.js` | Plain and AI job briefs |
 | `server/lib/catalog.js` | Services, tiers, and which license each service needs |
 | `server/lib/workos.js` | WorkOS AuthKit sign-in for the dashboard |
+| `server/lib/edge.js` | Checks the host's sign-in wall before the dashboard service opens |
 | `server/lib/security.js` | Tokens, sessions, form tokens, rate limits |
 | `test/flow.test.js` | End-to-end tests |
 
