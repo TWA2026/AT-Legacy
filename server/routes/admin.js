@@ -45,6 +45,12 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
     return config.publicUrl || (req.protocol + "://" + req.get("host"));
   }
 
+  // Cookies are HTTPS-only whenever the site is. PUBLIC_URL settles it when the host's proxy doesn't say.
+  const httpsSite = config.publicUrl.startsWith("https://");
+  function secureCookies(req) {
+    return httpsSite || req.secure;
+  }
+
   // With WorkOS keys set, sign-in goes through WorkOS and the password is switched off.
   const useWorkos = Boolean(config.workosKey && config.workosClientId);
   const NOT_SET_UP = "Sign-in hasn\u2019t been set up yet. Add ADMIN_PASSWORD, or the WorkOS keys, in the hosting settings.";
@@ -97,7 +103,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
     if (!safeEqual(req.body.password || "", config.adminPassword)) {
       return res.status(401).send(loginPage("That password isn\u2019t right."));
     }
-    res.set("Set-Cookie", sessionCookie(createSession(secret), req.secure));
+    res.set("Set-Cookie", sessionCookie(createSession(secret), secureCookies(req)));
     res.redirect(303, "/admin");
   });
 
@@ -106,7 +112,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
     if (!useWorkos) return next();
     if (!loginLimit(req.ip)) return res.status(429).send(loginPage("Too many attempts. Wait 15 minutes and try again."));
     const login = createLoginState(secret);
-    res.set("Set-Cookie", stateCookie(login.cookie, req.secure));
+    res.set("Set-Cookie", stateCookie(login.cookie, secureCookies(req)));
     res.redirect(302, authorizationUrl({
       clientId: config.workosClientId,
       redirectUri: siteUrl(req) + "/admin/callback",
@@ -119,7 +125,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
     try {
       if (!useWorkos) return next();
       const fail = (reason, status) => {
-        res.set("Set-Cookie", stateCookie("", req.secure));
+        res.set("Set-Cookie", stateCookie("", secureCookies(req)));
         return status ? res.status(status).send(loginPage(LOGIN_ERRORS[reason])) : res.redirect(303, "/admin/login?error=" + reason);
       };
       if (req.query.error || typeof req.query.code !== "string") return fail("cancelled");
@@ -137,8 +143,8 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       if (!user.emailVerified) return fail("unverified", 403);
       if (!config.adminEmails.includes(user.email)) return fail("not-allowed", 403);
 
-      res.append("Set-Cookie", stateCookie("", req.secure));
-      res.append("Set-Cookie", sessionCookie(createSession(secret), req.secure));
+      res.append("Set-Cookie", stateCookie("", secureCookies(req)));
+      res.append("Set-Cookie", sessionCookie(createSession(secret), secureCookies(req)));
       res.redirect(303, "/admin");
     } catch (error) {
       next(error);
@@ -146,7 +152,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   });
 
   router.get("/logout", (req, res) => {
-    res.set("Set-Cookie", sessionCookie("", req.secure));
+    res.set("Set-Cookie", sessionCookie("", secureCookies(req)));
     res.redirect(303, "/admin/login");
   });
 

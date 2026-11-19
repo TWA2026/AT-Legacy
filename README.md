@@ -29,14 +29,14 @@ Set these on the service's **Environment** tab in Slipway (see `.env.example`).
 
 | Name | Needed | Purpose |
 | --- | --- | --- |
-| `DATABASE_URL` | Yes | Set by `slipway.yaml` from the managed database |
+| `DATABASE_URL` | Yes | Set in the service spec from the managed database `db` |
 | `WORKOS_API_KEY`, `WORKOS_CLIENT_ID` | One sign-in method | Dashboard sign-in through WorkOS AuthKit. Setting both switches the password off |
 | `ADMIN_EMAILS` | With WorkOS | Comma-separated emails allowed into the dashboard. Empty means nobody |
 | `ADMIN_PASSWORD` | One sign-in method | Single dashboard password, used only when the WorkOS values are not set |
 | `ANTHROPIC_API_KEY` | No | Turns on the AI review |
 | `AI_MODEL` | No | Defaults to `claude-haiku-5-5` |
 | `FEE_PERCENT` | No | Finder's fee on new quote links. Defaults to 5 |
-| `PUBLIC_URL` | No | Address used in links copied from the dashboard. Defaults to the address you opened the dashboard on |
+| `PUBLIC_URL` | Recommended | The hub's public address, such as `https://atlegacyservices.com`. Used for the sign-in redirect, for links copied from the dashboard, and to keep sign-in cookies HTTPS-only. Defaults to the address you opened the dashboard on |
 | `RESEND_API_KEY`, `NOTIFY_FROM`, `NOTIFY_TO` | No | Emails you when a request or application arrives |
 
 ## Run it locally
@@ -55,13 +55,15 @@ Open `http://localhost:3000`. The dashboard is at `/admin`.
 
 ## Deploy on Slipway
 
-A push to `main` deploys everything in `slipway.yaml`:
+The Slipway project runs three services. A push to `main` rebuilds `at-legacy` and `hub`.
 
 | Service | What it is | Address |
 | --- | --- | --- |
 | `at-legacy` | The earlier public site, static files in `legacy-site/` | `atlegacyservices.com` until the switch below |
 | `hub` | The quote hub (this app) | Its own Slipway address until the switch below |
-| `db` | Postgres for the hub | Private |
+| `db` | Managed Postgres for the hub, with daily backups | Private |
+
+Slipway deploys from its own stored copy of the service spec, not from the `slipway.yaml` in this repo. The file here mirrors it. To add or change a service, change the stored spec in Slipway and keep `slipway.yaml` in step. The database was created in Slipway as a managed database named `db`, and the hub reads its address from `${service.db.url}`.
 
 Each `hub` deploy installs dependencies, runs `server/migrate.js` (safe to repeat, and it waits for the database on a first deploy), and starts `server/index.js`. The service is healthy when `/healthz` returns `ok`.
 
@@ -70,7 +72,7 @@ The dashboard at `/admin` stays locked until a sign-in method is set on the `hub
 ### Dashboard sign-in with WorkOS
 
 1. Create a WorkOS account and open **Applications**. Under **Redirects**, add `https://<the hub's address>/admin/callback` (add the `atlegacyservices.com` one too before the domain switch).
-2. In Slipway, add `WORKOS_API_KEY` as a secret, and `WORKOS_CLIENT_ID` and `ADMIN_EMAILS` as variables, on the `hub` service.
+2. In Slipway, add `WORKOS_API_KEY` as a secret, and `WORKOS_CLIENT_ID`, `ADMIN_EMAILS`, and `PUBLIC_URL` as variables, on the `hub` service. Redeploy `hub` so they take effect.
 3. In WorkOS, require multi-factor authentication for sign-in.
 
 WorkOS handles passwords, email verification, and two-factor codes. The app only checks that the signed-in, verified email is listed in `ADMIN_EMAILS`. Until the WorkOS values are set, `ADMIN_PASSWORD` works as a single-password fallback.
@@ -82,7 +84,7 @@ WorkOS handles passwords, email verification, and two-factor codes. The app only
 1. Open `at-legacy`, go to **Networking**, change its address to the Slipway domain, and save. This frees `atlegacyservices.com`.
 2. Open `hub`, go to **Networking**, pick `atlegacyservices.com` in the **Address** row, and save.
 
-No DNS change is needed. Afterwards, `legacy-site/`, the `at-legacy` service, and the `build` script can be removed.
+No DNS change is needed. Set `PUBLIC_URL` to `https://atlegacyservices.com` and redeploy `hub`. Afterwards, `legacy-site/`, the `at-legacy` service, and the `build` script can be removed.
 
 ## Files
 

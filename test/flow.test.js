@@ -212,6 +212,13 @@ test("the dashboard is locked without the password", async () => {
   // A change without the form token is refused.
   const noToken = await site.form("/admin/partners", { company: "X", contact_name: "Y" }, { cookie: admin.cookie });
   assert.equal(noToken.status, 403);
+
+  // An https PUBLIC_URL makes the session cookie HTTPS-only even when the proxy doesn't report https.
+  const signedIn = await site.form("/admin/login", { password: "correct horse" });
+  assert.match(signedIn.headers.get("set-cookie"), /; Secure/);
+  const plain = await start({ PUBLIC_URL: "" });
+  const plainSignIn = await plain.form("/admin/login", { password: "correct horse" });
+  assert.doesNotMatch(plainSignIn.headers.get("set-cookie"), /; Secure/);
 });
 
 test("WorkOS sign-in replaces the password and admits only listed, verified emails", async () => {

@@ -1,42 +1,41 @@
 version: 1
 
-# Two things run from this repo:
+# What runs on Slipway for this repo:
 #
-#   at-legacy  The current public site (static files in legacy-site/).
-#              It keeps serving atlegacyservices.com until the hub takes over.
+#   at-legacy  The earlier public site (static files in legacy-site/).
+#              It serves atlegacyservices.com until the hub takes over.
 #   hub        The quote hub: public pages, request API, private quote pages,
-#              and the owner's dashboard, with its Postgres database.
+#              and the owner's dashboard.
 #
-# To move atlegacyservices.com to the hub, see "Switching the domain" in README.md.
-
-databases:
-  - name: db
-    engine: postgres
-    version: "18"
-    diskSizeGB: 1
+# The hub's Postgres database is a managed database named "db" in the same
+# Slipway project. It is created in Slipway, not declared here.
+#
+# Slipway keeps its own copy of this spec for the project, and that copy is
+# what deploys. A change here needs the same change there. Custom domains are
+# also set in Slipway. See "Deploy on Slipway" in README.md.
 
 services:
   - name: at-legacy
     type: static
+    rootDir: .
     runtime: node
     runtimeVersion: "22"
     buildCommand: npm run build
     publish: dist
-    domain: atlegacyservices.com
 
   - name: hub
+    rootDir: .
     runtime: node
     runtimeVersion: "22"
     buildCommand: npm ci --omit=dev
     command: ["node", "server/index.js"]
-    dependsOn: [db]
     preDeploy: ["node", "server/migrate.js"]
     ports:
       - port: 3000
         public: true
     healthCheckPath: /healthz
-    cpu: 0.25
-    memory: 512MB
+    cpu: 250m
+    memory: 512Mi
     env:
       NODE_ENV: production
       PORT: "3000"
