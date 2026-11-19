@@ -3,8 +3,10 @@ const { esc, page, briefHtml, formatDate } = require("../lib/html");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
 const {
-  newToken, safeEqual, createSession, readSession, csrfToken, sessionCookie, rateLimiter
+  newToken, safeEqual, createSession, readSession, csrfToken, sessionCookie, rateLimiter,
+  createLoginState, checkLoginState, stateCookie
 } = require("../lib/security");
+const { authorizationUrl, exchangeCode } = require("../lib/workos");
 
 const STATUS_LABELS = {
   new: "New", collecting: "Collecting quotes", chosen: "Company chosen", closed: "Closed",
@@ -20,7 +22,7 @@ function options(values, selected) {
   return values.map((value) => `<option${value === selected ? " selected" : ""}>${esc(value)}</option>`).join("");
 }
 
-module.exports = function adminRoutes({ pool, secret, config }) {
+module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   const router = express.Router();
   const loginLimit = rateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
 
@@ -43,12 +45,35 @@ module.exports = function adminRoutes({ pool, secret, config }) {
     return config.publicUrl || (req.protocol + "://" + req.get("host"));
   }
 
+  // With WorkOS keys set, sign-in goes through WorkOS and the password is switched off.
+  const useWorkos = Boolean(config.workosKey && config.workosClientId);
+  const NOT_SET_UP = "Sign-in hasn\u2019t been set up yet. Add ADMIN_PASSWORD, or the WorkOS keys, in the hosting settings.";
+  const LOGIN_ERRORS = {
+    cancelled: "Sign-in was cancelled or didn\u2019t finish. Try again.",
+    expired: "That sign-in attempt expired. Try again.",
+    failed: "We couldn\u2019t confirm that sign-in. Try again.",
+    unverified: "Verify your email address with the sign-in provider, then try again.",
+    "not-allowed": "That account isn\u2019t allowed to open this dashboard."
+  };
+
   function loginPage(message) {
+    const error = message ? `<p class="form-error" role="alert">${esc(message)}</p>` : "";
+    if (useWorkos) {
+      return page({
+        title: "Sign in",
+        heading: "Dashboard",
+        body: `    <div class="quote-form">
+      ${error}
+      <p>Sign in with the account you use to manage AT Legacy Services.</p>
+      <a class="primary" href="/admin/login/start">Sign in</a>
+    </div>`
+      });
+    }
     return page({
       title: "Log in",
       heading: "Dashboard",
       body: `    <form class="quote-form" method="post" action="/admin/login">
-      ${message ? `<p class="form-error" role="alert">${esc(message)}</p>` : ""}
+      ${error}
       <div class="fields">
         <div class="field wide">
           <label for="password">Password</label>
@@ -61,18 +86,63 @@ module.exports = function adminRoutes({ pool, secret, config }) {
   }
 
   router.get("/login", (req, res) => {
-    if (!config.adminPassword) return res.status(503).send(loginPage("The dashboard password hasn’t been set yet. Add ADMIN_PASSWORD in the hosting settings."));
-    res.send(loginPage());
+    if (!useWorkos && !config.adminPassword) return res.status(503).send(loginPage(NOT_SET_UP));
+    res.send(loginPage(LOGIN_ERRORS[req.query.error]));
   });
 
   router.post("/login", (req, res) => {
-    if (!config.adminPassword) return res.status(503).send(loginPage("The dashboard password hasn’t been set yet. Add ADMIN_PASSWORD in the hosting settings."));
+    if (useWorkos) return res.redirect(303, "/admin/login");
+    if (!config.adminPassword) return res.status(503).send(loginPage(NOT_SET_UP));
     if (!loginLimit(req.ip)) return res.status(429).send(loginPage("Too many attempts. Wait 15 minutes and try again."));
     if (!safeEqual(req.body.password || "", config.adminPassword)) {
-      return res.status(401).send(loginPage("That password isn’t right."));
+      return res.status(401).send(loginPage("That password isn\u2019t right."));
     }
     res.set("Set-Cookie", sessionCookie(createSession(secret), req.secure));
     res.redirect(303, "/admin");
+  });
+
+  // WorkOS sign-in, step 1: send the browser to the hosted login page.
+  router.get("/login/start", (req, res, next) => {
+    if (!useWorkos) return next();
+    if (!loginLimit(req.ip)) return res.status(429).send(loginPage("Too many attempts. Wait 15 minutes and try again."));
+    const login = createLoginState(secret);
+    res.set("Set-Cookie", stateCookie(login.cookie, req.secure));
+    res.redirect(302, authorizationUrl({
+      clientId: config.workosClientId,
+      redirectUri: siteUrl(req) + "/admin/callback",
+      state: login.state
+    }));
+  });
+
+  // Step 2: WorkOS sends the browser back here with a one-time code.
+  router.get("/callback", async (req, res, next) => {
+    try {
+      if (!useWorkos) return next();
+      const fail = (reason, status) => {
+        res.set("Set-Cookie", stateCookie("", req.secure));
+        return status ? res.status(status).send(loginPage(LOGIN_ERRORS[reason])) : res.redirect(303, "/admin/login?error=" + reason);
+      };
+      if (req.query.error || typeof req.query.code !== "string") return fail("cancelled");
+      if (!checkLoginState(secret, req.headers.cookie, req.query.state)) return fail("expired");
+
+      const user = await exchangeCode({
+        apiKey: config.workosKey,
+        clientId: config.workosClientId,
+        code: req.query.code,
+        ip: req.ip,
+        userAgent: req.get("user-agent") || "",
+        fetchImpl
+      });
+      if (!user) return fail("failed");
+      if (!user.emailVerified) return fail("unverified", 403);
+      if (!config.adminEmails.includes(user.email)) return fail("not-allowed", 403);
+
+      res.append("Set-Cookie", stateCookie("", req.secure));
+      res.append("Set-Cookie", sessionCookie(createSession(secret), req.secure));
+      res.redirect(303, "/admin");
+    } catch (error) {
+      next(error);
+    }
   });
 
   router.get("/logout", (req, res) => {

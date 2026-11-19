@@ -10,7 +10,13 @@ const { createApp, readConfig } = require("./app");
 
   const server = app.listen(port, "0.0.0.0", () => {
     console.log("Listening on port " + port);
-    if (!config.adminPassword) console.log("ADMIN_PASSWORD is not set. The dashboard is locked until it is.");
+    if (config.workosKey && config.workosClientId) {
+      console.log("Dashboard sign-in: WorkOS." + (config.adminEmails.length ? "" : " ADMIN_EMAILS is empty, so nobody can sign in yet."));
+    } else if (config.adminPassword) {
+      console.log("Dashboard sign-in: password.");
+    } else {
+      console.log("Dashboard sign-in is not set up. The dashboard is locked until ADMIN_PASSWORD or the WorkOS keys are added.");
+    }
     console.log(config.anthropicKey ? "AI review is on." : "AI review is off (no ANTHROPIC_API_KEY). Briefs are built from the customer's answers.");
   });
 

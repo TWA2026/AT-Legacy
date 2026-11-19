@@ -30,7 +30,9 @@ Set these on the service's **Environment** tab in Slipway (see `.env.example`).
 | Name | Needed | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes | Set by `slipway.yaml` from the managed database |
-| `ADMIN_PASSWORD` | Yes | Dashboard password. The dashboard stays locked until this is set |
+| `WORKOS_API_KEY`, `WORKOS_CLIENT_ID` | One sign-in method | Dashboard sign-in through WorkOS AuthKit. Setting both switches the password off |
+| `ADMIN_EMAILS` | With WorkOS | Comma-separated emails allowed into the dashboard. Empty means nobody |
+| `ADMIN_PASSWORD` | One sign-in method | Single dashboard password, used only when the WorkOS values are not set |
 | `ANTHROPIC_API_KEY` | No | Turns on the AI review |
 | `AI_MODEL` | No | Defaults to `claude-haiku-5-5` |
 | `FEE_PERCENT` | No | Finder's fee on new quote links. Defaults to 5 |
@@ -63,7 +65,15 @@ A push to `main` deploys everything in `slipway.yaml`:
 
 Each `hub` deploy installs dependencies, runs `server/migrate.js` (safe to repeat, and it waits for the database on a first deploy), and starts `server/index.js`. The service is healthy when `/healthz` returns `ok`.
 
-After the first deploy, add `ADMIN_PASSWORD` as a secret on the `hub` service's **Environment** tab. The dashboard at `/admin` stays locked until it is set.
+The dashboard at `/admin` stays locked until a sign-in method is set on the `hub` service's **Environment** tab.
+
+### Dashboard sign-in with WorkOS
+
+1. Create a WorkOS account and open **Applications**. Under **Redirects**, add `https://<the hub's address>/admin/callback` (add the `atlegacyservices.com` one too before the domain switch).
+2. In Slipway, add `WORKOS_API_KEY` as a secret, and `WORKOS_CLIENT_ID` and `ADMIN_EMAILS` as variables, on the `hub` service.
+3. In WorkOS, require multi-factor authentication for sign-in.
+
+WorkOS handles passwords, email verification, and two-factor codes. The app only checks that the signed-in, verified email is listed in `ADMIN_EMAILS`. Until the WorkOS values are set, `ADMIN_PASSWORD` works as a single-password fallback.
 
 ### Switching the domain
 
@@ -90,6 +100,7 @@ No DNS change is needed. Afterwards, `legacy-site/`, the `at-legacy` service, an
 | `server/routes/admin.js` | Dashboard: requests, partners, fees |
 | `server/lib/brief.js` | Plain and AI job briefs |
 | `server/lib/catalog.js` | Services, tiers, and which license each service needs |
+| `server/lib/workos.js` | WorkOS AuthKit sign-in for the dashboard |
 | `server/lib/security.js` | Tokens, sessions, form tokens, rate limits |
 | `test/flow.test.js` | End-to-end tests |
 

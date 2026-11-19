@@ -9,6 +9,9 @@ function readConfig(env) {
   const fee = Number(env.FEE_PERCENT);
   return {
     adminPassword: env.ADMIN_PASSWORD || "",
+    workosKey: env.WORKOS_API_KEY || "",
+    workosClientId: env.WORKOS_CLIENT_ID || "",
+    adminEmails: (env.ADMIN_EMAILS || "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean),
     anthropicKey: env.ANTHROPIC_API_KEY || "",
     aiModel: env.AI_MODEL || "",
     feePercent: Number.isFinite(fee) && fee >= 0 && fee <= 50 && env.FEE_PERCENT !== undefined && env.FEE_PERCENT !== "" ? fee : 5,

@@ -33,6 +33,28 @@ function readSession(secret, cookieHeader) {
   return { id: expires };
 }
 
+// A short-lived signed value that ties a login redirect to the browser that started it.
+const STATE_COOKIE = "atl_login";
+
+function createLoginState(secret) {
+  const state = newToken();
+  return { state, cookie: state + "." + sign(secret, "login:" + state) };
+}
+
+function checkLoginState(secret, cookieHeader, returnedState) {
+  const match = /(?:^|;\s*)atl_login=([^;]+)/.exec(cookieHeader || "");
+  if (!match || !returnedState) return false;
+  const [state, signature] = match[1].split(".");
+  if (!state || !signature) return false;
+  return safeEqual(signature, sign(secret, "login:" + state)) && safeEqual(state, returnedState);
+}
+
+function stateCookie(value, secure) {
+  const parts = [STATE_COOKIE + "=" + value, "Path=/admin", "HttpOnly", "SameSite=Lax", "Max-Age=" + (value ? 600 : 0)];
+  if (secure) parts.push("Secure");
+  return parts.join("; ");
+}
+
 function csrfToken(secret, session) {
   return sign(secret, "csrf:" + session.id);
 }
@@ -71,5 +93,6 @@ function rateLimiter({ limit, windowMs }) {
 }
 
 module.exports = {
-  newToken, sign, safeEqual, createSession, readSession, csrfToken, sessionCookie, rateLimiter
+  newToken, sign, safeEqual, createSession, readSession, csrfToken, sessionCookie, rateLimiter,
+  createLoginState, checkLoginState, stateCookie
 };

@@ -214,6 +214,91 @@ test("the dashboard is locked without the password", async () => {
   assert.equal(noToken.status, 403);
 });
 
+test("WorkOS sign-in replaces the password and admits only listed, verified emails", async () => {
+  const calls = [];
+  let reply = { ok: true, user: { email: "Owner@Example.test", email_verified: true } };
+  const fakeFetch = async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return { ok: reply.ok, status: reply.ok ? 200 : 400, json: async () => ({ user: reply.user }) };
+  };
+  const site = await start({ WORKOS_API_KEY: "sk_test_key", WORKOS_CLIENT_ID: "client_test", ADMIN_EMAILS: "owner@example.test, second@example.test" }, fakeFetch);
+
+  // The login page offers WorkOS sign-in only, and the password no longer works.
+  const loginPage = await (await site.get("/admin/login")).text();
+  assert.match(loginPage, /href="\/admin\/login\/start"/);
+  assert.doesNotMatch(loginPage, /type="password"/);
+  const password = await site.form("/admin/login", { password: "correct horse" });
+  assert.equal(password.status, 303);
+  assert.equal(password.headers.get("set-cookie"), null);
+
+  const begin = async () => {
+    const response = await site.get("/admin/login/start");
+    assert.equal(response.status, 302);
+    const target = new URL(response.headers.get("location"));
+    return { target, cookie: response.headers.get("set-cookie").split(";")[0], state: target.searchParams.get("state") };
+  };
+
+  const first = await begin();
+  assert.equal(first.target.origin + first.target.pathname, "https://api.workos.com/user_management/authorize");
+  assert.equal(first.target.searchParams.get("client_id"), "client_test");
+  assert.equal(first.target.searchParams.get("provider"), "authkit");
+  assert.equal(first.target.searchParams.get("response_type"), "code");
+  assert.equal(first.target.searchParams.get("redirect_uri"), "https://example.test/admin/callback");
+
+  // A callback that doesn't match the browser that started the login is refused before WorkOS is called.
+  const forged = await site.get("/admin/callback?code=abc&state=someone-elses", { cookie: first.cookie });
+  assert.equal(forged.headers.get("location"), "/admin/login?error=expired");
+  const noCookie = await site.get("/admin/callback?code=abc&state=" + first.state);
+  assert.equal(noCookie.headers.get("location"), "/admin/login?error=expired");
+  const cancelled = await site.get("/admin/callback?error=access_denied&state=" + first.state, { cookie: first.cookie });
+  assert.equal(cancelled.headers.get("location"), "/admin/login?error=cancelled");
+  assert.equal(calls.length, 0);
+
+  // A listed, verified email gets a working session. Matching ignores letter case.
+  const good = await site.get("/admin/callback?code=one-time-code&state=" + first.state, { cookie: first.cookie });
+  assert.equal(good.status, 303);
+  assert.equal(good.headers.get("location"), "/admin");
+  assert.equal(calls[0].url, "https://api.workos.com/user_management/authenticate");
+  assert.deepEqual(
+    { id: calls[0].body.client_id, secret: calls[0].body.client_secret, grant: calls[0].body.grant_type, code: calls[0].body.code },
+    { id: "client_test", secret: "sk_test_key", grant: "authorization_code", code: "one-time-code" }
+  );
+  const session = good.headers.getSetCookie().find((cookie) => cookie.startsWith("atl_admin=")).split(";")[0];
+  assert.equal((await site.get("/admin", { cookie: session })).status, 200);
+
+  // Anyone else is turned away, with no session.
+  const refuse = async (user, ok = true) => {
+    reply = { ok, user };
+    const attempt = await begin();
+    const response = await site.get("/admin/callback?code=x&state=" + attempt.state, { cookie: attempt.cookie });
+    assert.ok(!response.headers.getSetCookie().some((cookie) => cookie.startsWith("atl_admin=")));
+    return response;
+  };
+  const stranger = await refuse({ email: "stranger@example.test", email_verified: true });
+  assert.equal(stranger.status, 403);
+  assert.match(await stranger.text(), /isn\u2019t allowed/);
+  assert.equal((await refuse({ email: "owner@example.test", email_verified: false })).status, 403);
+  assert.equal((await refuse({ email: "owner@example.test", email_verified: true }, false)).headers.get("location"), "/admin/login?error=failed");
+  assert.equal((await refuse(null)).headers.get("location"), "/admin/login?error=failed");
+
+  // With no emails listed, nobody gets in.
+  reply = { ok: true, user: { email: "owner@example.test", email_verified: true } };
+  const empty = await start({ WORKOS_API_KEY: "sk_test_key", WORKOS_CLIENT_ID: "client_test", ADMIN_EMAILS: "" }, fakeFetch);
+  const emptyStart = await empty.get("/admin/login/start");
+  const emptyState = new URL(emptyStart.headers.get("location")).searchParams.get("state");
+  const emptyResult = await empty.get("/admin/callback?code=x&state=" + emptyState, { cookie: emptyStart.headers.get("set-cookie").split(";")[0] });
+  assert.equal(emptyResult.status, 403);
+
+  // Without WorkOS keys these routes do nothing: they fall through to the normal login redirect.
+  const plain = await start();
+  for (const path of ["/admin/login/start", "/admin/callback?code=x&state=y"]) {
+    const response = await plain.get(path);
+    assert.equal(response.status, 303);
+    assert.equal(response.headers.get("location"), "/admin/login");
+    assert.equal(response.headers.get("set-cookie"), null);
+  }
+});
+
 test("partner application and verification rules", async () => {
   const site = await start();
   const application = {
