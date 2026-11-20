@@ -2,6 +2,7 @@ const express = require("express");
 const { esc, page, briefHtml } = require("../lib/html");
 const { formatDollars } = require("../lib/validate");
 const { requestRef, customerPath, isOwnerPreview, recordOpen } = require("../lib/links");
+const { LIMITS, listFiles, loadFile, sendFile, galleryHtml, pickerHtml } = require("../lib/files");
 
 const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the customer&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
@@ -17,6 +18,36 @@ async function loadRequest(pool, token) {
   );
   request.quotes = quotes.rows;
   return request;
+}
+
+// The customer's pictures and files, with a way to add more while the request is open.
+function filesSection(request, files) {
+  const open = request.status !== "closed";
+  const base = "/r/" + request.token + "/files";
+  const note = (file) => {
+    if (file.kind !== "document") return "";
+    if (file.sharing === "shared") return '<p class="file-state">Shared with the companies quoting.</p>';
+    return '<p class="file-state">Only we can see this for now.</p>';
+  };
+  const gallery = galleryHtml(files, {
+    base,
+    extra: (file) => note(file) + (open ? `
+          <form method="post" action="${esc(base)}/${file.id}/remove"><button class="text-button" type="submit">Remove</button></form>` : "")
+  });
+  const room = LIMITS.filesPerRequest - files.length;
+  return `    <section class="app-section" id="files">
+      <h2>Pictures and files</h2>
+      ${files.length
+        ? '<p class="form-note">Companies quoting your job see your pictures. They don&rsquo;t see your name or contact details.</p>'
+        : `<p class="form-note">${open ? "You haven&rsquo;t added any. Pictures help companies quote without a visit." : "None were added."}</p>`}
+      ${gallery}
+      ${open && room > 0 ? `<div class="file-add" data-upload-to="${esc(request.token)}" data-upload-room="${room}">
+      <h3 class="file-add-title">${files.length ? "Add more" : "Add pictures or files"}</h3>
+      <p class="form-note">We remove location data from every picture. You can add ${room === 1 ? "1 more file" : room + " more files"}.</p>
+      ${pickerHtml()}
+      </div>` : ""}
+      ${open && room <= 0 ? `<p class="form-note">This request holds ${LIMITS.filesPerRequest} files, which is the most it can. Remove one to add another.</p>` : ""}
+    </section>`;
 }
 
 function tierCard(request, tier) {
@@ -64,6 +95,7 @@ module.exports = function customerRoutes({ pool }) {
       const request = await loadRequest(pool, req.params.token);
       if (!request) return next();
       await recordOpen(pool, req, { requestId: request.id });
+      const files = await listFiles(pool, request.id);
       const ready = request.quotes.filter((quote) => quote.status === "submitted").length;
       let intro = "We’re collecting your quotes. Save this page: it’s your private link, and quotes appear here as they arrive.";
       if (request.status === "chosen") intro = "You’ve chosen a company. You hire and pay them directly.";
@@ -75,6 +107,7 @@ module.exports = function customerRoutes({ pool }) {
         heading: "Your " + request.service.toLowerCase() + " request",
         intro: "Reference " + requestRef(request.id) + ", for " + (String(request.name).trim().split(/\s+/)[0] || "you") + ". " + intro,
         wide: true,
+        scripts: ["uploads.js"],
         body: `${isOwnerPreview(req) ? "    " + OWNER_NOTE + "\n" : ""}    <section class="app-section">
       <h2>Your quotes</h2>
       <ul class="quote-cards">
@@ -86,8 +119,36 @@ module.exports = function customerRoutes({ pool }) {
       <h2>Your job brief</h2>
       <p class="form-note">This is what each company is pricing.</p>
       ${briefHtml(request)}
-    </section>`
+    </section>
+${filesSection(request, files)}`
       }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // One of the customer's own pictures or files.
+  router.get("/:token/files/:file", async (req, res, next) => {
+    try {
+      const request = (await pool.query("select id from requests where token = $1", [req.params.token])).rows[0];
+      const file = request && await loadFile(pool, request.id, req.params.file);
+      if (!file) return next();
+      sendFile(res, file);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The customer takes a file back. Allowed until the request is closed.
+  router.post("/:token/files/:file/remove", async (req, res, next) => {
+    try {
+      const request = (await pool.query("select id, token, name, status from requests where token = $1", [req.params.token])).rows[0];
+      if (!request) return next();
+      const id = Number(req.params.file);
+      if (request.status !== "closed" && Number.isInteger(id)) {
+        await pool.query("delete from request_files where id = $1 and request_id = $2", [id, request.id]);
+      }
+      res.redirect(303, customerPath(request) + "#files");
     } catch (error) {
       next(error);
     }

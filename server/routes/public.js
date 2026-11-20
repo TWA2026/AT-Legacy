@@ -4,6 +4,7 @@ const { InputError, text, oneOf } = require("../lib/validate");
 const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER } = require("../lib/catalog");
 const { buildBrief, plainBrief } = require("../lib/brief");
 const { newToken, sign, safeEqual, rateLimiter } = require("../lib/security");
+const { BODY_LIMIT, FileError, saveFile } = require("../lib/files");
 
 const PROPERTIES = ["My home", "My rental property", "Other"];
 const TIMINGS = ["As soon as possible", "Within a month", "In 1 to 3 months", "I’m flexible"];
@@ -41,6 +42,9 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
   const partnerLimit = rateLimiter({ limit: 5, windowMs: 3600 * 1000 });
   // Across all visitors. Past this many AI briefs in a day, briefs are built without AI.
   const aiDailyBudget = rateLimiter({ limit: 300, windowMs: 24 * 3600 * 1000 });
+
+  // Pictures and files: enough for a customer adding to a few requests, not for filling the disk.
+  const uploadLimit = rateLimiter({ limit: 60, windowMs: 3600 * 1000 });
 
   router.use(express.json({ limit: "20kb" }));
 
@@ -102,6 +106,28 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
       notify("New quote request: " + job.service, "A new request for " + job.service + " in " + job.location + " is waiting in your dashboard." + (config.publicUrl ? "\n\n" + config.publicUrl + "/admin" : ""));
       res.status(201).json({ url: customerPath({ id: saved.rows[0].id, token, name }) });
     } catch (error) {
+      next(error);
+    }
+  });
+
+  // A customer adds one picture or file to their request. The request's secret is the permission.
+  // The body is the file itself: a JPEG the browser made from a picture, or a PDF.
+  //   POST /api/requests/<secret>/files?kind=site|idea|document&name=<file name>
+  const fileBody = express.raw({ type: ["image/jpeg", "application/pdf"], limit: BODY_LIMIT });
+  router.post("/requests/:token/files", guard(uploadLimit), (req, res, next) => {
+    fileBody(req, res, (error) => {
+      if (error && error.type === "entity.too.large") return res.status(413).json({ error: "That file is too large to send." });
+      next(error);
+    });
+  }, async (req, res, next) => {
+    try {
+      const request = (await pool.query("select id, status from requests where token = $1", [String(req.params.token)])).rows[0];
+      if (!request) return res.status(404).json({ error: "We couldn’t find that request." });
+      if (!Buffer.isBuffer(req.body)) throw new FileError(415, "We can take pictures and PDF files. This file is neither.");
+      const file = await saveFile(pool, request, { kind: String(req.query.kind || ""), name: String(req.query.name || ""), data: req.body });
+      res.status(201).json({ id: file.id, kind: file.kind, name: file.name, size: file.size });
+    } catch (error) {
+      if (error instanceof FileError) return res.status(error.status).json({ error: error.message });
       next(error);
     }
   });

@@ -98,7 +98,7 @@ async function addVerifiedPartner(site, admin, company, tier, trade = "Fence") {
 
 test.before(async () => {
   pool = createPool(DATABASE_URL);
-  await pool.query("drop table if exists link_events, quotes, requests, partners, settings cascade");
+  await pool.query("drop table if exists request_files, link_events, quotes, requests, partners, settings cascade");
   await migrate(pool);
   await migrate(pool); // safe to repeat
   secret = await loadSecret(pool);
@@ -1275,6 +1275,239 @@ test("the spreadsheet view and the Excel file list every open request, straight 
   assert.ok(later["xl/worksheets/sheet3.xml"].includes('<c r="I2" s="4"><v>4950.5</v></c>'));
   assert.ok(later["xl/worksheets/sheet3.xml"].includes('<c r="K2" s="0"><v>5</v></c><c r="L2" s="4"><v>247.53</v></c>'));
   assert.ok(later["xl/worksheets/sheet3.xml"].includes(">No</t>"));
+});
+
+// A 16 by 12 pixel photo that carries what a phone writes into a picture: a GPS position,
+// the camera's name, and a comment.
+const PHOTO = Buffer.from("/9j/4AAQSkZJRgABAQAAAQABAAD/4QC8RXhpZgAATU0AKgAAAAgAAwEPAAIAAAANAAAAMgEQAAIAAAANAAAAQIglAAQAAAABAAAATgAAAABUZXN0Q2FtTWFrZXIAAFRlc3RDYW1Nb2RlbAAAAAQAAQACAAAAAk4AAAAAAgAFAAAAAwAAAIQAAwACAAAAAlcAAAAABAAFAAAAAwAAAJwAAAAAAAAAHAAAAAEAAAANAAAAAQAAAB4AAAABAAAAUgAAAAEAAAAbAAAAAQAAAA8AAAAB//4AFXRha2VuIGF0IDEyMyBPYWsgU3T/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAMABADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDKJTy3ZpGaJm/ezfx3Dddq57dDz7E87Vp/7xZv4UnRfolon/xXPuQT3c8RpMxt5bwALJE6RRAdIgQx+X3+Xr7k9eakESC4S1xmJYPPZc/6xvK3/MfTt7DOOSSbez/rpf8AL/LRLXlX9ff/AF+e5//Z", "base64");
+const PDF = Buffer.from("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n", "latin1");
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+
+test("pictures and files: sent by the customer, cleaned, and shown only to the right people", async () => {
+  const files = require("../server/lib/files");
+  const site = await start({ SITE_ORIGINS: "https://www.example.test" });
+  const admin = await login(site);
+  const cookie = { cookie: admin.cookie };
+
+  // The picture arrives with a GPS position, a camera name, and a comment. None of it is kept.
+  assert.ok(PHOTO.includes("Exif") && PHOTO.includes("TestCamMaker") && PHOTO.includes("123 Oak St"));
+  const cleaned = files.stripJpegMetadata(PHOTO);
+  assert.ok(cleaned.length < PHOTO.length && cleaned[0] === 0xff && cleaned[1] === 0xd8);
+  assert.ok(!cleaned.includes("Exif") && !cleaned.includes("TestCamMaker") && !cleaned.includes("123 Oak St"));
+  assert.ok(cleaned.includes(Buffer.from([0xff, 0xc0])) && cleaned.includes(Buffer.from([0xff, 0xda])), "the picture itself is untouched");
+  assert.deepEqual(cleaned.subarray(cleaned.indexOf(Buffer.from([0xff, 0xda]))), PHOTO.subarray(PHOTO.indexOf(Buffer.from([0xff, 0xda]))));
+  assert.deepEqual(files.stripJpegMetadata(cleaned), cleaned, "cleaning twice changes nothing");
+  assert.equal(files.stripJpegMetadata(PHOTO.subarray(0, 300)), null, "half a picture is not a picture");
+  assert.equal(files.stripJpegMetadata(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0xff, 0xff]), PHOTO.subarray(6)])), null, "a length that runs past the end");
+  assert.equal(files.stripJpegMetadata(PNG), null);
+  assert.equal(files.sniff(PDF), "application/pdf");
+  assert.equal(files.sniff(PNG), "");
+  assert.equal(files.cleanName("../../etc/Dana\u0000 Smith  yard.HEIC", "image/jpeg"), "Dana Smith yard.jpg");
+  assert.equal(files.cleanName("", "application/pdf"), "document.pdf");
+  // Companies get plain names, numbered the way the page lays the files out, and steady when one is held back.
+  const pdf = "application/pdf";
+  assert.deepEqual([...files.plainNames([{ id: 4, kind: "idea" }, { id: 5, kind: "document", mime: pdf }, { id: 6, kind: "site" }, { id: 7, kind: "document" }, { id: 8, kind: "site" }])],
+    [[6, "Picture 1"], [8, "Picture 2"], [4, "Picture 3"], [5, "Document 1"], [7, "Document picture 1"]]);
+  assert.equal(files.cleanName("C:\\Users\\dana\\survey.final.pdf", "application/pdf"), "survey.final.pdf");
+
+  const { url, row } = await createRequest(site);
+  const token = row.token;
+  const send = (kind, name, body, type = "image/jpeg", to = token, headers = {}) => fetch(
+    site.base + "/api/requests/" + to + "/files?kind=" + kind + "&name=" + encodeURIComponent(name),
+    { method: "POST", headers: { "content-type": type, ...headers }, body }
+  );
+  const stored = async () => (await pool.query("select id, kind, name, mime, size, sharing from request_files where request_id = $1 order by id", [row.id])).rows;
+
+  // A page on the site's own address may send a file to the hub.
+  const preflight = await fetch(site.base + "/api/requests/" + token + "/files?kind=site&name=a.jpg", {
+    method: "OPTIONS", headers: { origin: "https://www.example.test", "access-control-request-method": "POST", "access-control-request-headers": "content-type" }
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), "https://www.example.test");
+  assert.match(preflight.headers.get("access-control-allow-headers"), /content-type/);
+
+  // Pictures of the area and of ideas, and a document.
+  const first = await send("site", "Dana <b>back yard.JPG", PHOTO, "image/jpeg", token, { origin: "https://www.example.test" });
+  assert.equal(first.status, 201);
+  assert.equal(first.headers.get("access-control-allow-origin"), "https://www.example.test");
+  const firstFile = await first.json();
+  assert.deepEqual({ kind: firstFile.kind, name: firstFile.name, size: firstFile.size }, { kind: "site", name: "Dana <b>back yard.jpg", size: cleaned.length });
+  assert.equal((await send("idea", "pinterest.png", PHOTO)).status, 201);
+  assert.equal((await send("document", "Smith survey.pdf", PDF, "application/pdf")).status, 201);
+  let saved = await stored();
+  assert.deepEqual(saved.map((file) => [file.kind, file.mime, file.sharing]), [["site", "image/jpeg", "shared"], ["idea", "image/jpeg", "shared"], ["document", "application/pdf", "review"]]);
+  assert.equal(saved[1].name, "pinterest.jpg", "a picture's name ends the way the stored file does");
+  const kept = (await pool.query("select data from request_files where id = $1", [saved[0].id])).rows[0].data;
+  assert.deepEqual(kept, cleaned, "what is stored is the cleaned picture");
+
+  // What is refused, and why.
+  const refused = async (response, status, pattern) => {
+    assert.equal(response.status, status);
+    assert.match((await response.json()).error, pattern);
+  };
+  await refused(await send("site", "a.png", PNG), 415, /pictures and PDF files/);
+  await refused(await send("site", "a.jpg", PHOTO.subarray(0, 300)), 415, /couldn’t read that picture/);
+  await refused(await send("site", "plan.pdf", PDF, "application/pdf"), 415, /under Plans or documents/);
+  await refused(await send("site", "a.txt", "hello", "text/plain"), 415, /pictures and PDF files/);
+  await refused(await send("site", "a.jpg", Buffer.alloc(0)), 400, /empty/);
+  await refused(await send("garden", "a.jpg", PHOTO), 400, /where this file belongs/);
+  await refused(await send("site", "a.jpg", PHOTO, "image/jpeg", "not-a-real-secret"), 404, /couldn’t find that request/);
+  await refused(await send("document", "big.pdf", Buffer.concat([PDF, Buffer.alloc(files.LIMITS.pdfBytes)]), "application/pdf"), 413, /over 3 MB/);
+  await refused(await send("document", "huge.pdf", Buffer.concat([PDF, Buffer.alloc(files.BODY_LIMIT)]), "application/pdf"), 413, /too large/);
+  await refused(await send("site", "big.jpg", Buffer.concat([PHOTO, Buffer.alloc(files.LIMITS.jpegBytes)])), 413, /too large/);
+  assert.equal((await stored()).length, 3, "nothing refused was kept");
+
+  // The customer's page shows them, lets the customer add more, and serves each one safely.
+  const customerPage = await (await site.get(url)).text();
+  assert.match(customerPage, /<h2>Pictures and files<\/h2>/);
+  assert.match(customerPage, /<script src="\/uploads\.js\?v=[a-f0-9]{10}" defer><\/script>/);
+  assert.ok(customerPage.includes('data-upload-to="' + token + '" data-upload-room="7"'));
+  assert.ok(customerPage.includes("Dana &lt;b&gt;back yard.jpg") && !customerPage.includes("<b>back"));
+  assert.match(customerPage, /Smith survey\.pdf[\s\S]*Only we can see this for now\./);
+  const base = "/r/" + token + "/files/";
+  const picture = await site.get(base + saved[0].id);
+  assert.equal(picture.status, 200);
+  assert.equal(picture.headers.get("content-type"), "image/jpeg");
+  assert.equal(picture.headers.get("content-security-policy"), "default-src 'none'; sandbox");
+  assert.equal(picture.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(picture.headers.get("cache-control"), "private, max-age=3600");
+  assert.equal(picture.headers.get("content-disposition"), 'inline; filename="Dana _b_back yard.jpg"');
+  assert.deepEqual(Buffer.from(await picture.arrayBuffer()), cleaned);
+  const survey = await site.get(base + saved[2].id);
+  assert.equal(survey.headers.get("content-type"), "application/pdf");
+  assert.match(survey.headers.get("content-disposition"), /^attachment; filename="Smith survey\.pdf"$/);
+  assert.equal((await site.get(base + "999999")).status, 404);
+  assert.equal((await site.get(base + "abc")).status, 404);
+  // Another customer's secret doesn't open this customer's files.
+  const other = await createRequest(site, { name: "Other Person" });
+  assert.equal((await site.get("/r/" + other.row.token + "/files/" + saved[0].id)).status, 404);
+
+  // The owner sees everything, and is told a document is waiting.
+  const home = await (await site.get("/admin", cookie)).text();
+  assert.ok(home.includes('<a href="/admin/requests/' + row.id + '#files">1 document to check before any company sees it</a>'));
+  assert.match(home, /pictures and files use \d KB of the 200 MB set aside for them/);
+  const ownerPage = await (await site.get("/admin/requests/" + row.id, cookie)).text();
+  assert.match(ownerPage, /<section class="app-section" id="files">/);
+  assert.ok(ownerPage.includes("Dana &lt;b&gt;back yard.jpg") && !ownerPage.includes("<b>back") && ownerPage.includes("Smith survey.pdf"));
+  assert.match(ownerPage, /class="file-state needs-you">No company can see this until you decide\./);
+  const ownerFile = "/admin/requests/" + row.id + "/files/";
+  assert.equal((await site.get(ownerFile + saved[2].id, cookie)).status, 200);
+  assert.equal((await site.get(ownerFile + saved[2].id)).status, 303, "signed out: sent to the login page");
+  assert.equal((await site.get("/admin/requests/" + other.row.id + "/files/" + saved[2].id, cookie)).status, 404);
+
+  // Two companies are invited. Each sees the pictures under plain names, and not the document.
+  const budget = await addVerifiedPartner(site, admin, "Budget Fence LLC", "Affordable");
+  const crown = await addVerifiedPartner(site, admin, "Crown Fence & Gate", "Premium");
+  for (const [partner, tier] of [[budget, "Affordable"], [crown, "Premium"]]) {
+    assert.equal((await site.form("/admin/requests/" + row.id + "/invite", { csrf: admin.csrf, partner: String(partner.id), tier }, cookie)).status, 303);
+  }
+  const quotes = (await pool.query("select * from quotes where request_id = $1 order by id", [row.id])).rows;
+  const companyUrl = "/q/" + quotes[0].token;
+  let companyPage = await (await site.get(companyUrl)).text();
+  assert.match(companyPage, /<h2>Pictures from the customer<\/h2>/);
+  assert.ok(companyPage.includes('alt="Picture 1"') && companyPage.includes('alt="Picture 2"'));
+  assert.ok(companyPage.includes("<h3>Ideas the customer likes</h3>") && !companyPage.includes("Ideas you like"));
+  assert.ok(!/Dana|Smith|yard|survey|pinterest|Document/.test(companyPage), "no file names, and no document");
+  assert.ok(!companyPage.includes("uploads.js") && !companyPage.includes("/remove"));
+  const shownPicture = await site.get(companyUrl + "/files/" + saved[0].id);
+  assert.equal(shownPicture.status, 200);
+  assert.equal(shownPicture.headers.get("content-disposition"), 'inline; filename="Picture 1.jpg"');
+  assert.equal((await site.get(companyUrl + "/files/" + saved[2].id)).status, 404, "the document is not shared yet");
+  const elsewhere = await createRequest(site, { name: "Third Person" });
+  assert.equal((await site.form("/admin/requests/" + elsewhere.row.id + "/invite", { csrf: admin.csrf, partner: String(budget.id), tier: "Affordable" }, cookie)).status, 303);
+  const otherQuote = (await pool.query("select token from quotes where request_id = $1", [elsewhere.row.id])).rows[0];
+  assert.equal((await site.get("/q/" + otherQuote.token + "/files/" + saved[0].id)).status, 404, "a quote link opens only its own request's files");
+  assert.doesNotMatch(await (await site.get("/q/" + otherQuote.token)).text(), /Pictures from the customer/);
+
+  // The owner shares the document and holds back a picture.
+  const share = (id, sharing, fields = { csrf: admin.csrf }) => site.form(ownerFile + id + "/sharing", { ...fields, sharing }, cookie);
+  assert.equal((await share(saved[2].id, "shared", {})).status, 403, "needs the form token");
+  assert.equal((await share(saved[2].id, "review")).status, 303);
+  assert.equal((await stored())[2].sharing, "review", "review is where a document starts, not a choice");
+  const shared = await share(saved[2].id, "shared");
+  assert.equal(shared.status, 303);
+  assert.equal(shared.headers.get("location"), "/admin/requests/" + row.id + "#files");
+  assert.equal((await share(saved[1].id, "private")).status, 303);
+  assert.deepEqual((await stored()).map((file) => file.sharing), ["shared", "private", "shared"]);
+  companyPage = await (await site.get(companyUrl)).text();
+  assert.ok(companyPage.includes('alt="Picture 1"') && !companyPage.includes('alt="Picture 2"') && companyPage.includes("Document 1"));
+  const sharedSurvey = await site.get(companyUrl + "/files/" + saved[2].id);
+  assert.equal(sharedSurvey.status, 200);
+  assert.equal(sharedSurvey.headers.get("content-disposition"), 'attachment; filename="Document 1.pdf"');
+  assert.equal((await site.get(companyUrl + "/files/" + saved[1].id)).status, 404, "the picture the owner held back");
+  assert.doesNotMatch(await (await site.get("/admin", cookie)).text(), /to check before any company/);
+  assert.match(await (await site.get(url)).text(), /Smith survey\.pdf[\s\S]*Shared with the companies quoting\./);
+
+  // The customer takes a picture back, and adds until the request is full.
+  const removed = await site.form(base + saved[1].id + "/remove", {});
+  assert.equal(removed.status, 303);
+  assert.match(removed.headers.get("location"), /#files$/);
+  assert.equal((await site.form("/r/" + other.row.token + "/files/" + saved[0].id + "/remove", {})).status, 303);
+  assert.deepEqual((await stored()).map((file) => file.id), [saved[0].id, saved[2].id], "only their own file, and only with their own secret");
+  for (let count = 2; count < files.LIMITS.filesPerRequest; count += 1) {
+    assert.equal((await send("idea", "idea " + count + ".jpg", PHOTO)).status, 201);
+  }
+  await refused(await send("idea", "one too many.jpg", PHOTO), 409, /can hold 10 files/);
+  // Uploads that arrive at the same moment are still counted one at a time.
+  await pool.query("delete from request_files where id = (select max(id) from request_files where request_id = $1)", [row.id]);
+  const together = await Promise.all([1, 2, 3, 4].map((n) => send("idea", "together " + n + ".jpg", PHOTO)));
+  assert.deepEqual(together.map((response) => response.status).sort(), [201, 409, 409, 409]);
+  assert.equal((await stored()).length, files.LIMITS.filesPerRequest);
+  const fullPage = await (await site.get(url)).text();
+  assert.match(fullPage, /This request holds 10 files/);
+  assert.ok(!fullPage.includes("data-upload-to"));
+
+  // Once the customer chooses, the company that wasn't chosen no longer sees the files. The chosen one does.
+  for (const quote of quotes) {
+    assert.equal((await site.form("/q/" + quote.token, { action: "submit", amount: "4000", timeline: "2 weeks", includes: "Everything" })).status, 303);
+  }
+  assert.equal((await site.form("/r/" + token + "/choose", { quote: String(quotes[1].id) })).status, 303);
+  assert.equal((await site.get(companyUrl + "/files/" + saved[0].id)).status, 404);
+  assert.doesNotMatch(await (await site.get(companyUrl)).text(), /Pictures from the customer/);
+  assert.equal((await site.get("/q/" + quotes[1].token + "/files/" + saved[0].id)).status, 200);
+  assert.match(await (await site.get("/q/" + quotes[1].token)).text(), /Pictures from the customer/);
+
+  // A closed request takes nothing more, and keeps what it has.
+  assert.equal((await site.form("/admin/requests/" + other.row.id + "/status", { csrf: admin.csrf, status: "closed" }, cookie)).status, 303);
+  await refused(await send("site", "late.jpg", PHOTO, "image/jpeg", other.row.token), 409, /closed/);
+  await pool.query("insert into request_files (request_id, kind, name, mime, size, data) values ($1, 'site', 'kept.jpg', 'image/jpeg', $2, $3)", [other.row.id, cleaned.length, cleaned]);
+  const keptFile = (await pool.query("select id from request_files where request_id = $1", [other.row.id])).rows[0];
+  assert.equal((await site.form("/r/" + other.row.token + "/files/" + keptFile.id + "/remove", {})).status, 303);
+  assert.equal((await pool.query("select count(*)::int as n from request_files where request_id = $1", [other.row.id])).rows[0].n, 1);
+  const closedPage = await (await site.get(other.url)).text();
+  assert.ok(!closedPage.includes("data-upload-to") && !closedPage.includes("/remove"));
+
+  // The storage set aside for files is a hard stop, and the owner is warned before it fills.
+  const realTotal = files.LIMITS.totalBytes;
+  files.LIMITS.totalBytes = (await files.storageUsed(pool)) + 100;
+  const fresh = await createRequest(site, { name: "Fourth Person" });
+  await refused(await send("site", "no room.jpg", PHOTO, "image/jpeg", fresh.row.token), 507, /can’t take more files right now/);
+  assert.match(await (await site.get("/admin", cookie)).text(), /Picture storage is 9\d% full/);
+  files.LIMITS.totalBytes = realTotal;
+  assert.equal((await send("site", "room again.jpg", PHOTO, "image/jpeg", fresh.row.token)).status, 201);
+
+  // Deleting a request takes its files with it.
+  await pool.query("delete from quotes where request_id = $1", [fresh.row.id]);
+  await pool.query("delete from requests where id = $1", [fresh.row.id]);
+  assert.equal((await pool.query("select count(*)::int as n from request_files where request_id = $1", [fresh.row.id])).rows[0].n, 0);
+});
+
+test("the request form carries the same file buttons as the customer's page, and the build ships the uploader", () => {
+  const files = require("../server/lib/files");
+  const site = path.join(__dirname, "..", "site");
+  const squash = (html) => html.replace(/\s+/g, " ").replace(/> </g, "><").trim();
+  const form = fs.readFileSync(path.join(site, "quote.html"), "utf8");
+  const picker = form.slice(form.indexOf('<div class="file-groups" data-uploads>'), form.indexOf("</section>", form.indexOf('<div class="file-groups" data-uploads>')));
+  assert.equal(squash(picker), squash(files.pickerHtml()));
+  // The uploader loads before the form's own script, which uses it.
+  assert.ok(form.indexOf('src="uploads.js"') > 0 && form.indexOf('src="uploads.js"') < form.indexOf('src="quote.js"'));
+  // The limits the browser checks are the ones the server enforces.
+  const uploader = fs.readFileSync(path.join(site, "uploads.js"), "utf8");
+  assert.ok(uploader.includes("var MAX_FILES = " + files.LIMITS.filesPerRequest + ";"));
+  assert.ok(uploader.includes("var PDF_BYTES = 3 * 1024 * 1024;") && files.LIMITS.pdfBytes === 3 * 1024 * 1024);
+  assert.ok(Number(/var JPEG_BYTES = (\d+);/.exec(uploader)[1]) < files.LIMITS.jpegBytes);
+  // The pictures a browser may show are its own files and ones it drew itself. The uploader needs nothing more.
+  assert.ok(!/createObjectURL|innerHTML|\.style\./.test(uploader));
 });
 
 test("repairs go to our own crew with no fee", async () => {

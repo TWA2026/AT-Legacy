@@ -9,6 +9,7 @@
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js" defer></script>
+  <script src="uploads.js" defer></script>
   <script src="quote.js" defer></script>
 </head>
 <body>
@@ -241,6 +242,36 @@
             <label for="details">Describe the job</label>
             <textarea id="details" name="details" rows="5" maxlength="1000" required></textarea>
           </div>
+        </div>
+      </section>
+
+      <section class="form-part" aria-labelledby="files-title">
+        <h2 id="files-title">Pictures and files <span class="optional">(optional)</span></h2>
+        <p class="form-note">Pictures help companies quote without a visit. We remove location data from every picture. Companies see your pictures, but not your name or contact details.</p>
+        <div class="file-groups" data-uploads>
+          <div class="file-group" data-kind="site">
+            <h3>The area today</h3>
+            <p class="help">Where the work will go, and anything in the way.</p>
+            <ul class="file-list" hidden></ul>
+            <input class="file-input" id="files-site" type="file" accept="image/*" multiple>
+            <label class="secondary" for="files-site">Add photos</label>
+          </div>
+          <div class="file-group" data-kind="idea">
+            <h3>Ideas you like</h3>
+            <p class="help">Pictures or screenshots of a look you want.</p>
+            <ul class="file-list" hidden></ul>
+            <input class="file-input" id="files-idea" type="file" accept="image/*" multiple>
+            <label class="secondary" for="files-idea">Add pictures</label>
+          </div>
+          <div class="file-group" data-kind="document">
+            <h3>Plans or documents</h3>
+            <p class="help">A survey, a drawing, or HOA rules, as a PDF or a picture. We check these before any company sees them, because they often show a name or an address.</p>
+            <ul class="file-list" hidden></ul>
+            <input class="file-input" id="files-document" type="file" accept="application/pdf,image/*" multiple>
+            <label class="secondary" for="files-document">Add files</label>
+          </div>
+          <p class="form-note" data-upload-status role="status" hidden></p>
+          <p class="form-error" data-upload-error role="alert" hidden></p>
         </div>
       </section>
 

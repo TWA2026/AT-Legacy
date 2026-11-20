@@ -47,6 +47,16 @@ The `link_events` table records when the owner copies, texts, emails, or shares 
 
 `server/lib/xlsx.js` writes the workbook with no outside packages. Everything a person typed is written as text, never as a formula.
 
+### Pictures and files
+
+On the request form a customer can add up to 10 files in three groups: **The area today**, **Ideas you like**, and **Plans or documents**. They can add or remove files later on their private page, until the request is closed. The owner can use that same page to add pictures a customer sent some other way.
+
+- **Pictures** are redrawn in the customer's browser as JPEGs no larger than 1600 pixels on the long side (`site/uploads.js`). That makes them small enough to send from a phone, and it leaves the camera's notes behind, including the GPS position. The server removes those notes again from whatever arrives (`server/lib/files.js`), so nothing depends on the browser doing it.
+- **Documents** are PDFs of up to 3 MB, or pictures of pages.
+- **Who sees what.** The customer and the owner see every file. A company sees a file only while it can still quote, or after it is chosen, and only if the file is shared. Pictures are shared as soon as they are added. A document waits for the owner, because surveys and plans often show a name or an address: the request's page in the dashboard has **Share with companies** and **Keep private** under each one, and the Requests tab says when one is waiting. Companies get plain names such as "Picture 2", never the file's own name.
+- **Where they are kept.** In the database (`request_files`). Its disk is 1 GB and the database's own log takes about half of that, so files are held to 200 MB in all, 60 MB a day, and 15 MB a request. The Requests tab shows how much is used and warns at 80%. At 100% the form still sends requests, but tells customers their files didn't go with them. To hold more, give the database a larger disk in Slipway and raise `LIMITS.totalBytes`, or move files to a storage bucket.
+- A PDF from a customer is a file from a stranger. It downloads instead of opening inside the site. Treat it like an email attachment.
+
 ### Certification: the approved vendor list
 
 A company gets onto the approved vendor list in three steps, all on the Partners tab.
@@ -75,6 +85,8 @@ The certification is AT Legacy Services' own. The certificate and the For compan
 
 ## Rules the code enforces
 
+- A customer's files are served only to the customer (by their private link), the owner, and a company quoting that request, and to a company only when the file is shared. A company's link never opens another request's files.
+- An upload must be a JPEG or a PDF by its own first bytes, whatever its name says. Anything else is refused.
 - A partner can be sent a brief only when their status is Approved. The database calls this status `verified`, and the public site calls these companies verified.
 - A partner can be approved only after the registration, insurance, and references checks are ticked, plus the license check when the trade needs one (`server/lib/catalog.js`), and after a site visit that meets every must-meet item of the standard. The owner's own crew is exempt.
 - A scorecard's boxes are named after each item's wording, not its place in the list, so a scorecard opened before the standard changed can't tick the wrong item.
@@ -183,6 +195,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `legacy-site/` | The earlier public site, kept as a fallback (`npm run build`) |
 | `site/index.html`, `site/home.js` | Home page, with its site plan drawing and service pictograms |
 | `site/quote.html`, `site/quote.js` | Request form and brief review |
+| `site/uploads.js` | The "add" buttons for pictures and files: shrinks each picture, shows what was added, and sends it |
 | `site/partners.html`, `site/partners.js` | Partner application |
 | `server/index.js`, `server/app.js` | Server start-up and routing |
 | `server/schema.sql`, `server/migrate.js`, `server/db.js` | Database tables and migration |
@@ -195,6 +208,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `server/lib/workos.js` | WorkOS AuthKit sign-in for the dashboard |
 | `server/lib/edge.js` | Checks the host's sign-in wall before the dashboard service opens |
 | `server/lib/links.js` | Names for private links, and the record of when each was sent and opened |
+| `server/lib/files.js` | Pictures and files: the limits, what may be stored, cleaning a picture, and who may see each file |
 | `server/lib/standard.js` | The certification standard: its starting draft, how a site visit is scored, and the tier the points suggest |
 | `server/lib/xlsx.js` | Writes the Excel downloads |
 | `server/lib/stamp.js` | Adds a fingerprint to each page's links to the stylesheet and scripts |

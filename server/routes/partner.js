@@ -3,6 +3,7 @@ const { esc, page, briefHtml } = require("../lib/html");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { OWN_CREW_TIER } = require("../lib/catalog");
 const { requestRef, companyPath, isOwnerPreview, recordOpen } = require("../lib/links");
+const { listFiles, loadFile, sendFile, plainNames, galleryHtml } = require("../lib/files");
 
 const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the company&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
@@ -23,6 +24,20 @@ async function loadQuote(pool, token) {
     [token]
   );
   return found.rows[0] || null;
+}
+
+// A company sees the customer's files while it can still quote, and after it is chosen.
+// It never sees one the owner hasn't shared, and it gets plain names: a file's own name can say who the customer is.
+function canSeeFiles(quote) {
+  const decided = quote.request_status === "chosen" || quote.request_status === "closed";
+  return !decided || quote.chosen_quote_id === quote.id;
+}
+
+async function sharedFiles(pool, quote) {
+  if (!canSeeFiles(quote)) return [];
+  const files = await listFiles(pool, quote.r_id);
+  const names = plainNames(files);
+  return files.filter((file) => file.sharing === "shared").map((file) => ({ ...file, shown: names.get(file.id) }));
 }
 
 function quoteForm(quote, error) {
@@ -57,7 +72,7 @@ function quoteForm(quote, error) {
     </form>`;
 }
 
-function render(quote, error, ownerPreview) {
+function render(quote, error, ownerPreview, files = []) {
   const won = quote.chosen_quote_id === quote.id;
   const decided = quote.request_status === "chosen" || quote.request_status === "closed";
   const ownCrew = quote.tier === OWN_CREW_TIER;
@@ -99,7 +114,12 @@ function render(quote, error, ownerPreview) {
     <section class="app-section">
       <h2>The job</h2>
       ${briefHtml({ service: quote.service, location: quote.location, property: quote.property, timing: quote.timing, size: quote.size, brief: quote.brief, answers: quote.answers })}
-    </section>`
+    </section>${files.length ? `
+    <section class="app-section" id="files">
+      <h2>Pictures from the customer</h2>
+      <p class="form-note">Tap a picture to see it full size.</p>
+      ${galleryHtml(files, { base: "/q/" + quote.token + "/files", label: (file) => file.shown, theirs: true })}
+    </section>` : ""}`
   });
 }
 
@@ -112,7 +132,21 @@ module.exports = function partnerRoutes({ pool }) {
       const quote = await loadQuote(pool, req.params.token);
       if (!quote) return next();
       await recordOpen(pool, req, { requestId: quote.r_id, quoteId: quote.id });
-      res.send(render(quote, "", isOwnerPreview(req)));
+      res.send(render(quote, "", isOwnerPreview(req), await sharedFiles(pool, quote)));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // One shared picture or file from the request this company is quoting.
+  router.get("/:token/files/:file", async (req, res, next) => {
+    try {
+      const quote = await loadQuote(pool, req.params.token);
+      if (!quote) return next();
+      const allowed = (await sharedFiles(pool, quote)).find((file) => String(file.id) === String(req.params.file));
+      const file = allowed && await loadFile(pool, quote.r_id, allowed.id);
+      if (!file || file.sharing !== "shared") return next();
+      sendFile(res, file, allowed.shown + (file.mime === "application/pdf" ? ".pdf" : ".jpg"));
     } catch (error) {
       next(error);
     }
@@ -141,7 +175,7 @@ module.exports = function partnerRoutes({ pool }) {
       else if (!form.includes) problem = "Describe what the price includes.";
       if (problem) {
         quote.form = form;
-        return res.status(400).send(render(quote, problem));
+        return res.status(400).send(render(quote, problem, false, await sharedFiles(pool, quote)));
       }
 
       await pool.query(

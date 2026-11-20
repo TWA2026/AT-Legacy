@@ -2963,3 +2963,212 @@ html {
     print-color-adjust: exact;
   }
 }
+
+/* Pictures and files a customer adds to a request. */
+
+/* The real file field is kept off screen but still reachable by keyboard. Its label is the button. */
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.file-input:focus-visible + label {
+  outline: 3px solid var(--bay);
+  outline-offset: 3px;
+}
+
+.file-input:disabled + label {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.file-groups {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  max-width: 760px;
+}
+
+.file-group {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  justify-items: start;
+}
+
+.file-group h3,
+.file-kind h3,
+.file-add-title {
+  font-size: 1.25rem;
+}
+
+.file-group .help {
+  max-width: 38em;
+  margin: 0;
+}
+
+/* What has been added so far, before the request is sent */
+.file-list {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-item {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px 8px 8px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.file-thumb {
+  display: block;
+  width: 64px;
+  height: 64px;
+  border-radius: 5px;
+  object-fit: cover;
+}
+
+.file-thumb-doc,
+.file-doc-kind {
+  display: grid;
+  place-items: center;
+  background: var(--navy);
+  color: var(--shell);
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.file-name {
+  overflow-wrap: anywhere;
+}
+
+/* A request's pictures and files, on the customer's page, a company's page, and the dashboard */
+.file-kind {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  max-width: 760px;
+}
+
+/* No max-width here: on a grid that fills its row with as many columns as fit, a max-width
+   becomes the narrowest the grid will go, and that pushes a phone's page sideways. */
+.file-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 18px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-card {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+
+@media (min-width: 720px) {
+  .file-cards {
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  }
+}
+
+.file-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-radius: 8px;
+  background: var(--white);
+  object-fit: cover;
+}
+
+.file-shot:focus-visible,
+.file-doc:focus-visible {
+  outline: 3px solid var(--bay);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+/* A height, not a square: a square tile grows wider than its column when a long name makes it taller. */
+.app-section a.file-doc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-content: center;
+  justify-items: center;
+  min-height: 140px;
+  padding: 12px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-radius: 8px;
+  background: var(--white);
+  color: var(--navy);
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.file-doc-kind {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+}
+
+/* In the dashboard every plain link is underlined in gold. These tiles are links, but not text links. */
+.owner-main a.file-doc:not(.primary):not(.secondary),
+.owner-main a.file-shot:not(.primary):not(.secondary) {
+  text-decoration: none;
+}
+
+.app-section .file-facts,
+.app-section .file-state {
+  color: var(--slate);
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.app-section .file-state.needs-you {
+  color: var(--navy);
+  font-weight: 800;
+}
+
+.file-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+
+.file-card .text-button {
+  text-align: left;
+}
+
+.file-add {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  max-width: 760px;
+  margin-top: 12px;
+  padding-top: 24px;
+  border-top: 2px solid var(--navy);
+}
+
+.owner-storage {
+  margin-top: 18px;
+}

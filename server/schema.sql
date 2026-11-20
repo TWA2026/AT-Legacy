@@ -92,3 +92,20 @@ create index if not exists link_events_link_idx on link_events (request_id, quot
 alter table partners add column if not exists visit jsonb not null default '{}';
 alter table partners add column if not exists approved_on text not null default '';
 alter table partners add column if not exists review_due text not null default '';
+
+-- Pictures and files a customer adds to a request. See server/lib/files.js.
+create table if not exists request_files (
+  id serial primary key,
+  request_id integer not null references requests(id) on delete cascade,
+  -- site | idea | document
+  kind text not null,
+  name text not null,
+  -- image/jpeg | application/pdf
+  mime text not null,
+  size integer not null,
+  -- shared: companies quoting can see it. review: waiting for the owner to decide. private: the owner kept it back.
+  sharing text not null default 'shared',
+  data bytea not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists request_files_request on request_files (request_id);

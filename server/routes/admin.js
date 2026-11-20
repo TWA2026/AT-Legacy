@@ -4,6 +4,7 @@ const { SEND_EVENTS, requestRef, customerPath, companyPath, loadActivity } = req
 const { workbook } = require("../lib/xlsx");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
+const { SHARING, LIMITS, megabytes, fileSize, listFiles, loadFile, storageUsed, sendFile, galleryHtml } = require("../lib/files");
 const {
   MAX_LABEL, MAX_POINTS, loadStandard, saveStandard, standardFromForm, possiblePoints, itemKey, metFromForm, scoreVisit,
   certificateNo, isDay, today, addMonths
@@ -319,6 +320,13 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
            from requests r join quotes q on q.id = r.chosen_quote_id
           where q.fee_percent > 0 and not q.fee_paid`
       )).rows[0].cents);
+      // Documents a customer added that no company can see until the owner decides.
+      const toCheck = (await pool.query(
+        `select f.request_id, count(*)::int as files from request_files f join requests r on r.id = f.request_id
+          where f.sharing = 'review' and r.status <> 'closed' group by f.request_id order by f.request_id`
+      )).rows;
+      const stored = await storageUsed(pool);
+      const full = Math.round(stored / LIMITS.totalBytes * 100);
 
       const items = requests.map((r) => {
         const quotes = allQuotes.filter((q) => q.request_id === r.id);
@@ -332,6 +340,11 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       if (needy.length) todo.push(`<li><a href="/admin/requests/${needy[0].r.id}">${plural(needy.length, "request needs", "requests need")} companies</a></li>`);
       if (waiting) todo.push(`<li><a href="/admin/partners">${plural(waiting, "company needs", "companies need")} a check or a visit</a></li>`);
       if (owed > 0) todo.push(`<li><a href="/admin/fees">${esc(formatDollars(owed))} in finder’s fees to collect</a></li>`);
+      if (toCheck.length) {
+        const count = toCheck.reduce((sum, row) => sum + row.files, 0);
+        todo.push(`<li><a href="/admin/requests/${toCheck[0].request_id}#files">${plural(count, "document", "documents")} to check before any company sees ${count === 1 ? "it" : "them"}</a></li>`);
+      }
+      if (full >= 80) todo.push(`<li>Picture storage is ${full}% full. Customers can&rsquo;t add pictures once it reaches 100%.</li>`);
 
       const rows = items.map(({ r, quotes, step }) => `<li class="owner-row${step.needsYou ? " needs-you" : ""}">
           <a class="owner-row-main" href="/admin/requests/${r.id}">${esc(r.service)} <span>for ${esc(r.name)}</span></a>
@@ -351,7 +364,8 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
     ${rows ? `<p class="owner-actions owner-sheet-links"><a class="secondary" href="/admin/tracker">Open the spreadsheet view</a> <a class="secondary" href="/admin/tracker.xlsx">Download for Excel</a></p>
     <ul class="owner-list">
 ${rows}
-    </ul>` : `<p class="owner-empty">No requests yet. They appear here as soon as a customer sends one. Your request form is on the <a href="/admin/links">Links</a> tab.</p>`}`
+    </ul>` : `<p class="owner-empty">No requests yet. They appear here as soon as a customer sends one. Your request form is on the <a href="/admin/links">Links</a> tab.</p>`}
+    ${stored ? `<p class="form-note owner-storage">Customers&rsquo; pictures and files use ${esc(fileSize(stored))} of the ${esc(megabytes(LIMITS.totalBytes))} set aside for them.</p>` : ""}`
       }));
     } catch (error) {
       next(error);
@@ -373,6 +387,20 @@ ${rows}
       const open = r.status !== "chosen" && r.status !== "closed";
       const step = nextStep(r, quotes);
       const activity = await loadActivity(pool, [r.id]);
+      const files = await listFiles(pool, r.id);
+      const fileBase = "/admin/requests/" + r.id + "/files";
+      const SHARING_SAYS = { shared: "Companies quoting can see this.", review: "No company can see this until you decide.", private: "Kept private. No company can see this." };
+      const shareButton = (to, label) => `<button class="text-button" type="submit" name="sharing" value="${to}">${label}</button>`;
+      const gallery = galleryHtml(files, {
+        base: fileBase,
+        theirs: true,
+        extra: (file) => `<p class="file-state${file.sharing === "review" ? " needs-you" : ""}">${SHARING_SAYS[file.sharing] || ""}</p>
+          <form class="file-share" method="post" action="${fileBase}/${file.id}/sharing">
+            ${csrfField}
+            ${file.sharing === "shared" ? shareButton("private", "Stop sharing") : shareButton("shared", "Share with companies")}
+            ${file.sharing === "review" ? shareButton("private", "Keep private") : ""}
+          </form>`
+      });
 
       const tiers = r.tiers.map((tier) => {
         const quote = quotes.find((item) => item.tier === tier);
@@ -460,6 +488,13 @@ ${tiers}
       ${briefHtml(r)}
       <dl class="brief"><dt>Customer&rsquo;s own words</dt><dd>${esc(r.details)}</dd></dl>
     </section>
+    <section class="app-section" id="files">
+      <h2>Pictures and files</h2>
+      ${files.length
+        ? `<p class="form-note">From the customer. Companies quoting see pictures right away, under plain names such as Picture 2. A document waits for you, because surveys and plans often show a name or an address.</p>
+      ${gallery}`
+        : '<p class="form-note">The customer hasn&rsquo;t added any. They can add pictures and files on their private page, so you can send them that link and ask.</p>'}
+    </section>
     <section class="app-section">
       <form method="post" action="/admin/requests/${r.id}/status" class="done-actions">
         ${csrfField}
@@ -516,6 +551,31 @@ ${tiers}
       const id = Number(req.params.id) || 0;
       await pool.query("delete from quotes where id = $1 and request_id = $2 and status <> 'submitted'", [Number(req.body.quote) || 0, id]);
       res.redirect(303, "/admin/requests/" + id);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/requests/:id/files/:file", async (req, res, next) => {
+    try {
+      const file = await loadFile(pool, Number(req.params.id) || 0, req.params.file);
+      if (!file) return next();
+      sendFile(res, file);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Who can see one of the customer's files: the companies quoting, or only the owner.
+  router.post("/requests/:id/files/:file/sharing", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id) || 0;
+      const file = Number(req.params.file);
+      const sharing = String(req.body.sharing || "");
+      if (Number.isInteger(file) && SHARING.includes(sharing) && sharing !== "review") {
+        await pool.query("update request_files set sharing = $1 where id = $2 and request_id = $3", [sharing, file, id]);
+      }
+      res.redirect(303, "/admin/requests/" + id + "#files");
     } catch (error) {
       next(error);
     }

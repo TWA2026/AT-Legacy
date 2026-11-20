@@ -16,6 +16,11 @@
   var reviewed = null;
   // Set in config.js. Empty when these pages and the API share one address.
   var api = String(window.ATL_API || "").replace(/\/+$/, "");
+  // Pictures and files wait here until the request is sent. See uploads.js.
+  var uploads = window.ATLUploads;
+  var picker = uploads ? uploads.mount(form.querySelector("[data-uploads]")) : null;
+  // Set once the request is saved, so a second tap can never send it twice.
+  var sentTo = "";
 
   // Links from the home page can name a service or a tier.
   var params = new URLSearchParams(window.location.search);
@@ -152,6 +157,7 @@
     if (value("size")) row("Size or how often", value("size"));
     row("The job", theJob);
     row("Quotes wanted", isOwnCrew() ? "One quote from AT Legacy Services" : chosenTiers().join(", "));
+    if (picker && picker.items().length) row("Pictures and files", picker.summary());
 
     followUpFields.textContent = "";
     brief.questions.forEach(function (question, index) {
@@ -199,7 +205,28 @@
     });
   });
 
+  // Sends the waiting pictures and files to the request that was just saved, one at a time.
+  // Resolves with the problems, if any. The request itself is already safe by this point.
+  function sendFiles(token) {
+    var waiting = picker ? picker.items() : [];
+    var problems = [];
+    function next(index) {
+      if (index >= waiting.length) return Promise.resolve(problems);
+      sendButton.textContent = "Sending file " + (index + 1) + " of " + waiting.length + "…";
+      return uploads.send(token, waiting[index]).catch(function (error) {
+        problems.push(waiting[index].name + ": " + error.message);
+      }).then(function () {
+        return next(index + 1);
+      });
+    }
+    return next(0);
+  }
+
   sendButton.addEventListener("click", function () {
+    if (sentTo) {
+      window.location.href = sentTo;
+      return;
+    }
     var body = job();
     body.name = value("name");
     body.phone = value("phone");
@@ -216,7 +243,26 @@
     sendButton.disabled = true;
     sendButton.textContent = "Sending…";
     post("/api/requests", body).then(function (data) {
-      window.location.href = api + data.url;
+      var page = api + data.url;
+      // A private page's address is /r/<secret>/<name>. The secret is what lets files be added.
+      var token = data.url.indexOf("/r/") === 0 ? data.url.split("/")[2] : "";
+      if (!token) {
+        window.location.href = page;
+        return null;
+      }
+      sentTo = page;
+      editButton.hidden = true;
+      return sendFiles(token).then(function (problems) {
+        if (!problems.length) {
+          window.location.href = page;
+          return;
+        }
+        sendError.textContent = "Your request was sent, but " + (problems.length === 1 ? "one file didn’t" : problems.length + " files didn’t") +
+          " go with it. " + problems.join(" ") + " You can add files on your request page.";
+        sendError.hidden = false;
+        sendButton.disabled = false;
+        sendButton.textContent = "Go to my request page";
+      });
     }, function (error) {
       sendError.textContent = error.message;
       sendError.hidden = false;

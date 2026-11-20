@@ -21,7 +21,8 @@ function esc(value) {
 
 const BRAND = '<a class="brand" href="/" aria-label="AT Legacy Services, home"><img src="/favicon.svg" alt="" width="44" height="44"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>';
 
-function page({ title, heading, intro = "", body, wide = false }) {
+// `scripts` names more files from site/ for the page to load, such as uploads.js.
+function page({ title, heading, intro = "", body, wide = false, scripts = [] }) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -32,7 +33,8 @@ function page({ title, heading, intro = "", body, wide = false }) {
   <meta name="theme-color" content="#13283A">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="${STYLES}">
-  <script src="${SCRIPT}" defer></script>
+  <script src="${SCRIPT}" defer></script>${scripts.map((file) => `
+  <script src="${stamped(file)}" defer></script>`).join("")}
 </head>
 <body>
   <header class="quote-head">
