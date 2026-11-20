@@ -381,7 +381,7 @@ test("the dashboard as its own service opens only behind the host's sign-in wall
   }
   assert.equal((await dash.json("/api/brief", JOB)).status, 404);
   assert.equal((await dash.json("/api/requests", { ...JOB, ...CONTACT })).status, 404);
-  for (const path of ["/styles.css", "/app.js", "/favicon.svg", "/fonts/public-sans-latin-400-normal.woff2", "/healthz"]) {
+  for (const path of ["/styles.css", "/styles.css?v=0123456789", "/app.js", "/app.js?v=0123456789", "/favicon.svg", "/fonts/public-sans-latin-400-normal.woff2", "/healthz"]) {
     assert.equal((await dash.get(path, via)).status, 200, path);
   }
 
@@ -602,6 +602,16 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   const site = await start();
   const admin = await login(site);
   const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
+
+  // Pages point at stylesheet and script addresses that change whenever the files do,
+  // so a browser can't show a new page with styles it saved before an update.
+  const framed = await see("/admin");
+  const styles = /<link rel="stylesheet" href="(\/styles\.css\?v=[0-9a-f]{10})">/.exec(framed);
+  const script = /<script src="(\/app\.js\?v=[0-9a-f]{10})" defer>/.exec(framed);
+  assert.ok(styles && script);
+  assert.equal((await site.get(styles[1])).status, 200);
+  assert.equal((await site.get(script[1])).status, 200);
+  assert.match(await (await site.get(styles[1])).text(), /\.owner-strip/);
 
   // Every dashboard page carries the owner strip and marks its tab. Pages for other people never do.
   for (const [path, tab] of [["/admin", "Requests"], ["/admin/partners", "Partners"], ["/admin/partners/new", "Partners"], ["/admin/fees", "Fees"], ["/admin/links", "Links"]]) {

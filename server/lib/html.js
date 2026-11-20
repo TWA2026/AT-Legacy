@@ -1,5 +1,24 @@
 // Server-rendered pages. Every value that reaches a page goes through esc().
 
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
+
+// Each file's address carries a fingerprint of its contents. When a file changes, its address
+// changes, so a browser never pairs a new page with a stylesheet it saved earlier.
+function stamped(file) {
+  let mark = "0";
+  try {
+    mark = crypto.createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "..", "site", file))).digest("hex").slice(0, 10);
+  } catch (error) {
+    // A missing file still gets an address. The page will simply load without it.
+  }
+  return "/" + file + "?v=" + mark;
+}
+
+const STYLES = stamped("styles.css");
+const SCRIPT = stamped("app.js");
+
 function esc(value) {
   return String(value === null || value === undefined ? "" : value)
     .replace(/&/g, "&amp;")
@@ -21,8 +40,8 @@ function page({ title, heading, intro = "", body, wide = false }) {
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#13283A">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="${STYLES}">
+  <script src="${SCRIPT}" defer></script>
 </head>
 <body>
   <header class="quote-head">
@@ -53,8 +72,8 @@ function ownerPage({ title, heading, intro = "", body, tabs, current = "", back 
   <meta name="robots" content="noindex, nofollow">
   <meta name="theme-color" content="#F2B544">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="${STYLES}">
+  <script src="${SCRIPT}" defer></script>
 </head>
 <body class="owner">
   <p class="owner-strip"><strong>Owner dashboard</strong> <span>Only you see this</span></p>
