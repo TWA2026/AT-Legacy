@@ -2,6 +2,13 @@ const express = require("express");
 const { esc, page, briefHtml } = require("../lib/html");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { OWN_CREW_TIER } = require("../lib/catalog");
+const { requestRef, companyPath, isOwnerPreview, recordOpen } = require("../lib/links");
+
+const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the company&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
+
+function pathFor(quote) {
+  return companyPath({ token: quote.token, requestId: quote.r_id, tier: quote.tier, company: quote.company });
+}
 
 async function loadQuote(pool, token) {
   const found = await pool.query(
@@ -50,7 +57,7 @@ function quoteForm(quote, error) {
     </form>`;
 }
 
-function render(quote, error) {
+function render(quote, error, ownerPreview) {
   const won = quote.chosen_quote_id === quote.id;
   const decided = quote.request_status === "chosen" || quote.request_status === "closed";
   const ownCrew = quote.tier === OWN_CREW_TIER;
@@ -86,9 +93,9 @@ function render(quote, error) {
   return page({
     title: "Quote request",
     heading: quote.service + " quote request",
-    intro: "For " + quote.company + (ownCrew ? "." : ". You’re the " + quote.tier.toLowerCase() + " quote on this request."),
+    intro: "Request " + requestRef(quote.r_id) + ", for " + quote.company + (ownCrew ? "." : ". You’re the " + quote.tier.toLowerCase() + " quote on this request."),
     wide: true,
-    body: `${status}
+    body: `${ownerPreview ? "    " + OWNER_NOTE + "\n" : ""}${status}
     <section class="app-section">
       <h2>The job</h2>
       ${briefHtml({ service: quote.service, location: quote.location, property: quote.property, timing: quote.timing, size: quote.size, brief: quote.brief, answers: quote.answers })}
@@ -99,11 +106,13 @@ function render(quote, error) {
 module.exports = function partnerRoutes({ pool }) {
   const router = express.Router();
 
-  router.get("/:token", async (req, res, next) => {
+  // The name after the secret is only a label for people. The page opens with or without it.
+  router.get(["/:token", "/:token/:name"], async (req, res, next) => {
     try {
       const quote = await loadQuote(pool, req.params.token);
       if (!quote) return next();
-      res.send(render(quote));
+      await recordOpen(pool, req, { requestId: quote.r_id, quoteId: quote.id });
+      res.send(render(quote, "", isOwnerPreview(req)));
     } catch (error) {
       next(error);
     }
@@ -114,13 +123,13 @@ module.exports = function partnerRoutes({ pool }) {
       const quote = await loadQuote(pool, req.params.token);
       if (!quote) return next();
       if (quote.request_status === "chosen" || quote.request_status === "closed") {
-        return res.redirect(303, "/q/" + quote.token);
+        return res.redirect(303, pathFor(quote));
       }
 
       const body = req.body || {};
       if (body.action === "visit" || body.action === "decline") {
         await pool.query("update quotes set status = $1 where id = $2", [body.action === "visit" ? "visit" : "declined", quote.id]);
-        return res.redirect(303, "/q/" + quote.token);
+        return res.redirect(303, pathFor(quote));
       }
 
       const field = (name, max) => String(body[name] || "").trim().slice(0, max);
@@ -140,7 +149,7 @@ module.exports = function partnerRoutes({ pool }) {
           where id = $5`,
         [cents, form.timeline, form.includes, form.warranty, quote.id]
       );
-      res.redirect(303, "/q/" + quote.token);
+      res.redirect(303, pathFor(quote));
     } catch (error) {
       next(error);
     }

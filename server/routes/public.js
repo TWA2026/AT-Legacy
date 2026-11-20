@@ -1,3 +1,4 @@
+const { customerPath } = require("../lib/links");
 const express = require("express");
 const { InputError, text, oneOf } = require("../lib/validate");
 const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER } = require("../lib/catalog");
@@ -91,15 +92,15 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
       });
 
       const token = newToken();
-      await pool.query(
+      const saved = await pool.query(
         `insert into requests (token, service, property, location, timing, size, details, tiers, answers, brief, name, phone, email, contact_method)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) returning id`,
         [token, job.service, job.property, job.location, job.timing, job.size, job.details, job.tiers,
           JSON.stringify(answers), JSON.stringify({ summary: brief.summary, scope: brief.scope, ai: brief.ai }),
           name, phone, email, contact]
       );
       notify("New quote request: " + job.service, "A new request for " + job.service + " in " + job.location + " is waiting in your dashboard." + (config.publicUrl ? "\n\n" + config.publicUrl + "/admin" : ""));
-      res.status(201).json({ url: "/r/" + token });
+      res.status(201).json({ url: customerPath({ id: saved.rows[0].id, token, name }) });
     } catch (error) {
       next(error);
     }

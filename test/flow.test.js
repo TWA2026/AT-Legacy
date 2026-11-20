@@ -61,7 +61,8 @@ async function createRequest(site, overrides = {}) {
   const response = await site.json("/api/requests", { ...JOB, ...CONTACT, ...overrides });
   assert.equal(response.status, 201);
   const { url } = await response.json();
-  const row = (await pool.query("select * from requests where token = $1", [url.slice(3)])).rows[0];
+  // The address is /r/<secret>/<name>. The secret is the part that opens the page.
+  const row = (await pool.query("select * from requests where token = $1", [url.split("/")[2]])).rows[0];
   return { url, row };
 }
 
@@ -77,7 +78,7 @@ async function addVerifiedPartner(site, admin, company, tier, trade = "Fence") {
 
 test.before(async () => {
   pool = createPool(DATABASE_URL);
-  await pool.query("drop table if exists quotes, requests, partners, settings cascade");
+  await pool.query("drop table if exists link_events, quotes, requests, partners, settings cascade");
   await migrate(pool);
   await migrate(pool); // safe to repeat
   secret = await loadSecret(pool);
@@ -563,10 +564,10 @@ test("full flow: request, invites, quotes, choice, and fee", async () => {
 
   // A quote from another request can't be chosen here.
   const other = await createRequest(site);
-  await site.form(other.url + "/choose", { quote: String(affordable.id) });
+  await site.form("/r/" + other.row.token + "/choose", { quote: String(affordable.id) });
   assert.equal((await pool.query("select status from requests where id = $1", [other.row.id])).rows[0].status, "new");
 
-  const chosen = await site.form(url + "/choose", { quote: String(affordable.id) });
+  const chosen = await site.form("/r/" + row.token + "/choose", { quote: String(affordable.id) });
   assert.equal(chosen.status, 303);
   const after = (await pool.query("select status, chosen_quote_id from requests where id = $1", [row.id])).rows[0];
   assert.deepEqual(after, { status: "chosen", chosen_quote_id: affordable.id });
@@ -582,7 +583,7 @@ test("full flow: request, invites, quotes, choice, and fee", async () => {
   // Nothing changes after the choice.
   await site.form("/q/" + top.token, { action: "submit", amount: "1", timeline: "now", includes: "x" });
   assert.equal((await pool.query("select amount_cents from quotes where id = $1", [top.id])).rows[0].amount_cents, "680000");
-  await site.form(url + "/choose", { quote: String(top.id) });
+  await site.form("/r/" + row.token + "/choose", { quote: String(top.id) });
   assert.equal((await pool.query("select chosen_quote_id from requests where id = $1", [row.id])).rows[0].chosen_quote_id, affordable.id);
 
   // Fee: 5% of $4,950 is $247.50, then 5% of the $5,200 final total is $260.
@@ -667,18 +668,21 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   home = await see("/admin");
   assert.match(home, /1 tier still needs a company/);
   detail = await see("/admin/requests/" + row.id);
-  const link = "https://example.test/q/" + quote.token;
+  // The link ends with the request's reference, the tier, and the company. Never the customer's name.
+  const link = "https://example.test/q/" + quote.token + "/r" + (1000 + row.id) + "-affordable-budget-i-fence-i";
   const said = "AT Legacy Services has a fence job for you to quote in 34637. The details and your quote form are here:";
-  assert.ok(detail.includes('href="sms:8135550199?&amp;body=' + encodeURIComponent(said + " " + link) + '">Text it to Pat</a>'));
+  assert.ok(detail.includes('href="sms:8135550199?&amp;body=' + encodeURIComponent(said + " " + link) + '" data-track-event="texted">Text it to Pat</a>'));
   // The typed email can't add recipients or text of its own: everything after the @ stays part of the address.
-  assert.ok(detail.includes('href="mailto:pat@example.test%3Fcc%3Dx%26body%3Dhi?subject=' + encodeURIComponent("Fence job to quote") + "&amp;body=" + encodeURIComponent(said + "\n\n" + link) + '">Email it to Pat</a>'));
-  assert.ok(detail.includes('<a href="' + link + '" target="_blank" rel="noopener">Open the company’s page</a>'));
+  assert.ok(detail.includes('href="mailto:pat@example.test%3Fcc%3Dx%26body%3Dhi?subject=' + encodeURIComponent("Fence job to quote") + "&amp;body=" + encodeURIComponent(said + "\n\n" + link) + '" data-track-event="emailed">Email it to Pat</a>'));
+  assert.ok(detail.includes('<a href="' + link + '?owner=1" target="_blank" rel="noopener">Open the company’s page</a>'));
+  assert.ok(detail.includes("Ends in <strong>r" + (1000 + row.id) + "-affordable-budget-i-fence-i</strong>"));
   assert.ok(detail.includes('data-share-url="' + link + '"'));
   // The customer: call, text, email, and their private page.
   assert.match(detail, /<a href="tel:8135550100">Call<\/a> <a href="sms:8135550100\?&amp;body=">Text<\/a>/);
   assert.match(detail, /href="mailto:dana%2Bquotes@example\.test\?subject=/);
   assert.ok(detail.includes("Text it to Dana</a>"));
-  assert.ok(detail.includes('<a href="https://example.test' + url + '" target="_blank" rel="noopener">Open the customer’s page</a>'));
+  assert.equal(url, "/r/" + row.token + "/r" + (1000 + row.id) + "-dana");
+  assert.ok(detail.includes('<a href="https://example.test' + url + '?owner=1" target="_blank" rel="noopener">Open the customer’s page</a>'));
   assert.match(detail, /This is the page the customer sees\./);
   assert.doesNotMatch(detail, /<b>Customer|<script>|0100 <x>/);
 
@@ -701,7 +705,7 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   assert.match(home, /1 of 2 quotes in/);
 
   // Chosen: the fee shows up as money to collect. Closed: nothing more to say.
-  await site.form(url + "/choose", { quote: String(quotes[0].id) });
+  await site.form("/r/" + row.token + "/choose", { quote: String(quotes[0].id) });
   home = await see("/admin");
   assert.match(home, /Budget &lt;i&gt;Fence&lt;\/i&gt; was chosen/);
   assert.match(home, /<a href="\/admin\/fees">\$247\.50 in finder’s fees to collect<\/a>/);
@@ -720,6 +724,211 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   }
   assert.match(links, /example\.test<wbr>\/quote/);
   assert.match(partnersPage = await see("/admin/partners"), /data-copy-text="https:\/\/example\.test\/partners"/);
+});
+
+// Reads a zip the plain way: the directory at the end, then each file. Checks every file's checksum.
+function unzip(buffer) {
+  const zlib = require("node:zlib");
+  const end = buffer.length - 22;
+  assert.equal(buffer.readUInt32LE(end), 0x06054b50);
+  const files = {};
+  let at = buffer.readUInt32LE(end + 16);
+  for (let i = 0; i < buffer.readUInt16LE(end + 10); i += 1) {
+    assert.equal(buffer.readUInt32LE(at), 0x02014b50);
+    const packedSize = buffer.readUInt32LE(at + 20);
+    const nameLength = buffer.readUInt16LE(at + 28);
+    const local = buffer.readUInt32LE(at + 42);
+    const name = buffer.toString("utf8", at + 46, at + 46 + nameLength);
+    const start = local + 30 + buffer.readUInt16LE(local + 26) + buffer.readUInt16LE(local + 28);
+    const data = zlib.inflateRawSync(buffer.subarray(start, start + packedSize));
+    assert.equal(zlib.crc32(data), buffer.readUInt32LE(at + 16), name);
+    files[name] = data.toString("utf8");
+    at += 46 + nameLength + buffer.readUInt16LE(at + 30) + buffer.readUInt16LE(at + 32);
+  }
+  return files;
+}
+
+test("private links carry a readable name, and the dashboard knows when each was sent and opened", async () => {
+  await pool.query("delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
+  const site = await start();
+  const admin = await login(site);
+  const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
+  const browser = { "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1" };
+  const partner = await addVerifiedPartner(site, admin, "Budget Fence LLC", "Affordable");
+  const { url, row } = await createRequest(site, { name: "Zoë O'Customer-Smith", email: "zoe@example.test" });
+  const ref = "R" + (1000 + row.id);
+  const opens = async (quoteId = null) => (await pool.query(
+    "select count(*)::int as n from link_events where request_id = $1 and quote_id is not distinct from $2 and event = 'opened'", [row.id, quoteId])).rows[0].n;
+
+  // The customer's link ends with the reference and their first name. The secret alone still opens the page.
+  assert.equal(url, "/r/" + row.token + "/" + ref.toLowerCase() + "-zoe");
+  for (const path of [url, "/r/" + row.token, "/r/" + row.token + "/some-other-name"]) {
+    const response = await site.get(path, browser);
+    assert.equal(response.status, 200, path);
+    assert.match(await response.text(), new RegExp("Reference " + ref + ", for Zoë\\."), path);
+  }
+  assert.equal((await site.get("/r/" + row.token + "x/" + ref.toLowerCase() + "-zoe", browser)).status, 404);
+
+  // Three visits in a row count as one open. A later visit counts again.
+  assert.equal(await opens(), 1);
+  await pool.query("update link_events set created_at = created_at - interval '3 minutes' where request_id = $1", [row.id]);
+  await site.get(url, browser);
+  assert.equal(await opens(), 2);
+
+  // The owner's own look and a message app's preview are not the customer opening it.
+  await pool.query("update link_events set created_at = created_at - interval '3 minutes' where request_id = $1", [row.id]);
+  const preview = await (await site.get(url + "?owner=1", browser)).text();
+  assert.match(preview, /class="owner-preview"><strong>Owner preview\.<\/strong> This is the customer&rsquo;s page/);
+  assert.doesNotMatch(await (await site.get(url, browser)).text(), /owner-preview/);
+  await pool.query("delete from link_events where request_id = $1 and created_at > now() - interval '1 minute'", [row.id]);
+  for (const agent of ["Mozilla/5.0 (Macintosh) AppleWebKit/601.2.4 Safari/601.2.4 facebookexternalhit/1.1 Facebot Twitterbot/1.0", "WhatsApp/2.23", "Slackbot-LinkExpanding 1.0", "curl/8.5.0", ""]) {
+    await site.get(url, { "user-agent": agent });
+  }
+  await site.get(url + "?owner=1", browser);
+  assert.equal(await opens(), 2);
+
+  // A company's link ends with the reference, the tier, and the company. It never names the customer.
+  await site.form("/admin/requests/" + row.id + "/invite", { csrf: admin.csrf, partner: String(partner.id), tier: "Affordable" }, { cookie: admin.cookie });
+  const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
+  const companyPath = "/q/" + quote.token + "/" + ref.toLowerCase() + "-affordable-budget-fence-llc";
+  let detail = await see("/admin/requests/" + row.id);
+  assert.ok(detail.includes('value="https://example.test' + companyPath + '"'));
+  assert.ok(detail.includes("Ends in <strong>" + ref.toLowerCase() + "-affordable-budget-fence-llc</strong>"));
+  assert.ok(detail.includes("Ends in <strong>" + ref.toLowerCase() + "-zoe</strong>"));
+  assert.doesNotMatch(companyPath, /zoe|customer|smith/);
+  assert.match(detail, new RegExp("Reference " + ref + "\\. Received"));
+  assert.ok(detail.includes('<div class="link-row" data-track="' + row.id + '" data-track-quote="' + quote.id + '" data-csrf="' + admin.csrf + '">'));
+  assert.ok(detail.includes('<div class="link-row" data-track="' + row.id + '" data-csrf="' + admin.csrf + '">'));
+  assert.match(detail, /data-copy="link-\d+" data-track-event="copied">Copy</);
+  assert.match(detail, /<p class="link-activity">Not sent from here yet\. Not opened yet\.<\/p>/);
+  assert.match(detail, /<p class="link-activity">Not sent from here yet\. Opened 2 times, last [A-Z][a-z]{2} \d+, \d+:\d\d [AP]M\.<\/p>/);
+
+  // The company's page says which request and which company it is for, and counts their visit.
+  for (const path of [companyPath, "/q/" + quote.token]) {
+    const page = await (await site.get(path, browser)).text();
+    assert.match(page, new RegExp("Request " + ref + ", for Budget Fence LLC\\. You’re the affordable quote"), path);
+    assert.doesNotMatch(page, /Zoë|owner-preview/, path);
+  }
+  assert.match(await (await site.get(companyPath + "?owner=1", browser)).text(), /Owner preview\.<\/strong> This is the company&rsquo;s page/);
+  assert.equal(await opens(quote.id), 1);
+  const answered = await site.form("/q/" + quote.token, { action: "submit", amount: "4950", timeline: "2 weeks", includes: "All of it" });
+  assert.equal(answered.headers.get("location"), companyPath);
+  const picked = await site.form("/r/" + row.token + "/choose", { quote: "0" });
+  assert.equal(picked.headers.get("location"), url);
+
+  // The dashboard reports each send. It takes only real links, known kinds of send, and the owner's own form token.
+  const report = (fields, headers = { cookie: admin.cookie }) => site.form("/admin/link-events", fields, headers);
+  assert.equal((await report({ csrf: admin.csrf, request: String(row.id), quote: String(quote.id), event: "texted" })).status, 204);
+  assert.equal((await report({ csrf: admin.csrf, request: String(row.id), quote: "", event: "emailed" })).status, 204);
+  assert.equal((await report({ csrf: "wrong", request: String(row.id), quote: "", event: "copied" })).status, 403);
+  assert.equal((await report({ csrf: admin.csrf, request: String(row.id), quote: "", event: "opened" })).status, 400);
+  assert.equal((await report({ csrf: admin.csrf, request: "999999", quote: "", event: "copied" })).status, 404);
+  assert.equal((await report({ csrf: admin.csrf, request: String(row.id), quote: "999999", event: "copied" })).status, 404);
+  assert.equal((await report({ csrf: admin.csrf, request: String(row.id), quote: "", event: "copied" }, {})).status, 303);
+  detail = await see("/admin/requests/" + row.id);
+  assert.match(detail, /<p class="link-activity">Texted [A-Z][a-z]{2} \d+, \d+:\d\d [AP]M\. Opened 1 time, last /);
+  assert.match(detail, /<p class="link-activity">Emailed [A-Z][a-z]{2} \d+, \d+:\d\d [AP]M\. Opened 2 times, last /);
+
+  // Removing a company removes its link's history with it.
+  await pool.query("update quotes set status = 'invited' where id = $1", [quote.id]);
+  await site.form("/admin/requests/" + row.id + "/uninvite", { csrf: admin.csrf, quote: String(quote.id) }, { cookie: admin.cookie });
+  assert.equal((await pool.query("select count(*)::int as n from link_events where quote_id = $1", [quote.id])).rows[0].n, 0);
+  assert.equal((await site.get(companyPath, browser)).status, 404);
+});
+
+test("the spreadsheet view and the Excel file list every open request, straight from the site", async () => {
+  await pool.query("delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
+  const site = await start();
+  const admin = await login(site);
+  const see = (path) => site.get(path, { cookie: admin.cookie });
+  const budget = await addVerifiedPartner(site, admin, "Budget Fence LLC", "Affordable");
+  const premier = await addVerifiedPartner(site, admin, "Premier Fence Co", "Premium");
+  const invite = (request, partner, tier) => site.form("/admin/requests/" + request.id + "/invite", { csrf: admin.csrf, partner: String(partner.id), tier }, { cookie: admin.cookie });
+
+  // One request with a price and a company still to answer, one with a formula for a name, one closed.
+  const first = await createRequest(site, { email: "dana@example.test" });
+  await invite(first.row, budget, "Affordable");
+  await invite(first.row, premier, "Premium");
+  const quotes = (await pool.query("select * from quotes where request_id = $1 order by tier", [first.row.id])).rows;
+  await site.form("/q/" + quotes[0].token, { action: "submit", amount: "$4,950.50", timeline: "Start in 2 weeks", includes: "Materials & labor <all>", warranty: "1 year" });
+  await site.get(first.url, { "user-agent": "Mozilla/5.0 Safari" });
+  const tricky = await createRequest(site, { name: '=HYPERLINK("http://evil.test","Click")', tiers: ["Mid-range"] });
+  const closed = await createRequest(site, { name: "Closed Customer" });
+  await site.form("/admin/requests/" + closed.row.id + "/status", { csrf: admin.csrf, status: "closed" }, { cookie: admin.cookie });
+  const ref = (request) => "R" + (1000 + request.row.id);
+
+  // Only the owner gets either one.
+  for (const path of ["/admin/tracker", "/admin/tracker.xlsx"]) {
+    const stranger = await site.get(path);
+    assert.equal(stranger.status, 303, path);
+    assert.equal(stranger.headers.get("location"), "/admin/login", path);
+  }
+
+  // The page: a row per open request, oldest first, that reloads itself.
+  const response = await see("/admin/tracker");
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const page = await response.text();
+  assert.match(page, /<meta http-equiv="refresh" content="60">/);
+  assert.match(page, /2 open requests\. Read from the site at /);
+  assert.ok(page.includes('<th scope="row"><a href="/admin/requests/' + first.row.id + '">' + ref(first) + "</a></th>"));
+  assert.ok(page.indexOf(ref(first)) < page.indexOf(ref(tricky)));
+  assert.ok(page.includes("<td>Budget Fence LLC: $4,950.50</td>"));
+  assert.ok(page.includes("<td>Premier Fence Co: waiting for quote</td>"));
+  assert.ok(page.includes('<td class="num">1 of 2</td>'));
+  assert.ok(page.includes("<td>No company yet</td>"));
+  assert.ok(page.includes("=HYPERLINK(&quot;http://evil.test&quot;,&quot;Click&quot;)"));
+  assert.doesNotMatch(page, /Closed Customer/);
+  assert.match(page, /href="\/admin\/tracker\.xlsx">Download for Excel</);
+  assert.match(await (await see("/admin")).text(), /href="\/admin\/tracker">Open the spreadsheet view<\/a> <a class="secondary" href="\/admin\/tracker\.xlsx">Download for Excel</);
+
+  // The Excel file: a real workbook, built when asked for.
+  const download = await see("/admin/tracker.xlsx");
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  assert.match(download.headers.get("content-disposition"), /^attachment; filename="AT-Legacy-requests-\d{4}-\d\d-\d\d\.xlsx"$/);
+  assert.equal(download.headers.get("cache-control"), "no-store");
+  const files = unzip(Buffer.from(await download.arrayBuffer()));
+  assert.match(files["xl/workbook.xml"], /<sheet name="Open requests" sheetId="1" r:id="rId1"\/><sheet name="Company quotes" sheetId="2" r:id="rId2"\/><sheet name="All requests" sheetId="3" r:id="rId3"\/>/);
+  const [openSheet, quoteSheet, allSheet] = [1, 2, 3].map((n) => files["xl/worksheets/sheet" + n + ".xml"]);
+
+  // Open requests: two rows under a frozen, filterable header. Dates and money are real numbers.
+  assert.match(openSheet, /<dimension ref="A1:U3"\/>/);
+  assert.match(openSheet, /<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"\/>/);
+  assert.match(openSheet, /<autoFilter ref="A1:U3"\/>/);
+  assert.ok(openSheet.includes('<c r="A2" t="inlineStr" s="6"><is><t xml:space="preserve">' + ref(first) + "</t></is></c>"));
+  assert.match(openSheet, /<c r="B2" s="3"><v>\d{5}\.\d+<\/v><\/c>/);
+  assert.ok(openSheet.includes('<c r="L2" s="5"><v>1</v></c><c r="M2" s="5"><v>2</v></c><c r="N2" s="4"><v>4950.5</v></c>'));
+  assert.ok(openSheet.includes("Budget Fence LLC: $4,950.50"));
+  assert.ok(openSheet.includes('<c r="T2" s="5"><v>1</v></c>'));
+  assert.ok(openSheet.includes(ref(first).toLowerCase() + "-dana</t>"));
+  const openLinks = files["xl/worksheets/_rels/sheet1.xml.rels"];
+  assert.ok(openLinks.includes('Target="' + site.base + "/admin/requests/" + first.row.id + '" TargetMode="External"'));
+  assert.ok(openLinks.includes('Target="https://example.test' + first.url + '" TargetMode="External"'));
+  assert.doesNotMatch(openSheet, /Closed Customer/);
+
+  // What a customer typed stays text. Nothing in the workbook is a formula.
+  assert.ok(openSheet.includes('<is><t xml:space="preserve">=HYPERLINK(&quot;http://evil.test&quot;,&quot;Click&quot;)</t></is>'));
+  for (const [name, xml] of Object.entries(files)) assert.doesNotMatch(xml, /<f[ >]/, name);
+
+  // Company quotes: one row per company on the open requests.
+  assert.match(quoteSheet, /<dimension ref="A1:S3"\/>/);
+  assert.ok(quoteSheet.includes("Budget Fence LLC") && quoteSheet.includes("Premier Fence Co"));
+  assert.ok(quoteSheet.includes('<c r="I2" s="4"><v>4950.5</v></c>'));
+  assert.ok(quoteSheet.includes("Materials &amp; labor &lt;all&gt;"));
+  assert.ok(quoteSheet.includes("Waiting for quote"));
+  assert.ok(files["xl/worksheets/_rels/sheet2.xml.rels"].includes("https://example.test/q/" + quotes[0].token + "/" + ref(first).toLowerCase() + "-affordable-budget-fence-llc"));
+
+  // All requests: the closed one too.
+  assert.match(allSheet, /<dimension ref="A1:M4"\/>/);
+  assert.ok(allSheet.includes("Closed Customer") && allSheet.includes(">Closed<"));
+
+  // A fee shows up once a customer chooses.
+  await site.form("/r/" + first.row.token + "/choose", { quote: String(quotes[0].id) });
+  const later = unzip(Buffer.from(await (await see("/admin/tracker.xlsx")).arrayBuffer()));
+  assert.ok(later["xl/worksheets/sheet3.xml"].includes('<c r="I2" s="4"><v>4950.5</v></c>'));
+  assert.ok(later["xl/worksheets/sheet3.xml"].includes('<c r="K2" s="0"><v>5</v></c><c r="L2" s="4"><v>247.53</v></c>'));
+  assert.ok(later["xl/worksheets/sheet3.xml"].includes(">No</t>"));
 });
 
 test("repairs go to our own crew with no fee", async () => {

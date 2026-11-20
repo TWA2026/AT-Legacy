@@ -72,3 +72,16 @@ create table if not exists quotes (
 
 create index if not exists quotes_partner_idx on quotes (partner_id);
 create index if not exists requests_created_idx on requests (created_at desc);
+
+-- When each private link was sent by the owner and opened by the person it is for.
+-- quote_id is empty for the customer's link.
+create table if not exists link_events (
+  id bigserial primary key,
+  request_id integer not null references requests(id) on delete cascade,
+  quote_id integer references quotes(id) on delete cascade,
+  -- copied | texted | emailed | shared | opened
+  event text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists link_events_link_idx on link_events (request_id, quote_id);

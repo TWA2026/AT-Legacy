@@ -39,7 +39,7 @@ services:
         to: https://dashboard-7ac3f48e.onslipway.sh/admin
         status: 302
       - from: /admin/*
-        to: https://dashboard-7ac3f48e.onslipway.sh/admin
+        to: https://dashboard-7ac3f48e.onslipway.sh/admin/:splat
         status: 302
       - from: /r/*
         to: https://hub-00dd216e.onslipway.sh/r/:splat

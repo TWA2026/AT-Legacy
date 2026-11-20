@@ -2062,3 +2062,108 @@ html {
     gap: 10px 14px;
   }
 }
+
+/* A private link's name and history, so the right one goes to the right person */
+.link-ends,
+.link-activity {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.link-ends {
+  color: var(--slate);
+  overflow-wrap: anywhere;
+}
+
+.link-ends strong {
+  color: var(--navy);
+}
+
+.link-activity {
+  padding-left: 10px;
+  border-left: 4px solid var(--glass);
+}
+
+.owner-sheet-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 22px 0 0;
+}
+
+/* Shown on a customer's or company's page when the owner opens it from the dashboard */
+.owner-preview {
+  max-width: 760px;
+  margin: 0 0 26px;
+  padding: 12px 16px;
+  background: var(--gold);
+  color: var(--navy);
+}
+
+/* The spreadsheet view: one row per open request. It scrolls sideways inside its own frame. */
+.tracker-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid rgba(19, 40, 58, 0.3);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.tracker-wrap:focus-visible {
+  outline: 3px solid var(--bay);
+  outline-offset: 3px;
+}
+
+.tracker {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.98rem;
+  white-space: nowrap;
+}
+
+.tracker th,
+.tracker td {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(19, 40, 58, 0.18);
+  text-align: left;
+  vertical-align: top;
+}
+
+.tracker thead th {
+  background: var(--navy);
+  color: var(--white);
+  font-weight: 600;
+}
+
+.tracker tbody th {
+  position: sticky;
+  left: 0;
+  border-right: 1px solid rgba(19, 40, 58, 0.18);
+  border-left: 6px solid transparent;
+  background: var(--white);
+  font-weight: 800;
+}
+
+.tracker thead th:first-child {
+  position: sticky;
+  left: 0;
+  border-left: 6px solid var(--navy);
+}
+
+.tracker-wrap + .form-note {
+  margin-top: 14px;
+}
+
+.tracker tr.needs-you th {
+  border-left-color: var(--gold);
+}
+
+.tracker tbody tr:last-child th,
+.tracker tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tracker .num {
+  text-align: right;
+}
+

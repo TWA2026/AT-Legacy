@@ -28,6 +28,25 @@ Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "O
 
 On a request, each private link has a Copy button plus one-tap ways to send it: text, email, the phone's share sheet, or open it to see what the other person sees. The text and email links are built only from digits and an encoded address (`textLink` and `emailLink` in `server/routes/admin.js`), so nothing typed into a form can change where they go.
 
+### Private links: names and history
+
+Every request has a reference, such as R1003. A private link is the secret that opens the page, then a name for people to read:
+
+| Link | Looks like | The name says |
+| --- | --- | --- |
+| Customer's page | `/r/<secret>/r1003-dana` | The reference and the customer's first name |
+| Company's quote page | `/q/<secret>/r1003-affordable-budget-fence` | The reference, the tier, and the company. Never the customer |
+
+The name is a label, not a lock: the secret alone still opens the page, so links sent before this change keep working. The dashboard shows each link's ending, and each page says who it is for, so a wrong link is easy to catch.
+
+The `link_events` table records when the owner copies, texts, emails, or shares a link from the dashboard, and when the person opens it. Reloads within two minutes count once. A message app drawing a preview of the link is not counted, and neither is the owner opening the page from the dashboard (those links carry `?owner=1`). Only the time is stored: no address, device, or location. The code is in `server/lib/links.js`.
+
+### The spreadsheet of open requests
+
+**Open the spreadsheet view** on the Requests tab shows every open request in one sheet, read from the database when the page loads. The page reloads itself every minute. **Download for Excel** builds a real `.xlsx` file at that moment with three sheets: open requests, every company quote on them, and all requests including closed ones. Dates and money are real numbers, the header row is frozen with filters on, and references and links are clickable.
+
+`server/lib/xlsx.js` writes the workbook with no outside packages. Everything a person typed is written as text, never as a formula.
+
 ## Rules the code enforces
 
 - A partner can be sent a brief only when their status is Verified.
@@ -147,6 +166,8 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `server/lib/catalog.js` | Services, tiers, and which license each service needs |
 | `server/lib/workos.js` | WorkOS AuthKit sign-in for the dashboard |
 | `server/lib/edge.js` | Checks the host's sign-in wall before the dashboard service opens |
+| `server/lib/links.js` | Names for private links, and the record of when each was sent and opened |
+| `server/lib/xlsx.js` | Writes the Excel download |
 | `server/lib/security.js` | Tokens, sessions, form tokens, rate limits |
 | `test/flow.test.js` | End-to-end tests |
 

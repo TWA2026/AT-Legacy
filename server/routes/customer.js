@@ -1,6 +1,9 @@
 const express = require("express");
 const { esc, page, briefHtml } = require("../lib/html");
 const { formatDollars } = require("../lib/validate");
+const { requestRef, customerPath, isOwnerPreview, recordOpen } = require("../lib/links");
+
+const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the customer&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
 async function loadRequest(pool, token) {
   const found = await pool.query("select * from requests where token = $1", [token]);
@@ -55,10 +58,12 @@ function tierCard(request, tier) {
 module.exports = function customerRoutes({ pool }) {
   const router = express.Router();
 
-  router.get("/:token", async (req, res, next) => {
+  // The name after the secret is only a label for people. The page opens with or without it.
+  router.get(["/:token", "/:token/:name"], async (req, res, next) => {
     try {
       const request = await loadRequest(pool, req.params.token);
       if (!request) return next();
+      await recordOpen(pool, req, { requestId: request.id });
       const ready = request.quotes.filter((quote) => quote.status === "submitted").length;
       let intro = "We’re collecting your quotes. Save this page: it’s your private link, and quotes appear here as they arrive.";
       if (request.status === "chosen") intro = "You’ve chosen a company. You hire and pay them directly.";
@@ -68,9 +73,9 @@ module.exports = function customerRoutes({ pool }) {
       res.send(page({
         title: "Your request",
         heading: "Your " + request.service.toLowerCase() + " request",
-        intro,
+        intro: "Reference " + requestRef(request.id) + ", for " + (String(request.name).trim().split(/\s+/)[0] || "you") + ". " + intro,
         wide: true,
-        body: `    <section class="app-section">
+        body: `${isOwnerPreview(req) ? "    " + OWNER_NOTE + "\n" : ""}    <section class="app-section">
       <h2>Your quotes</h2>
       <ul class="quote-cards">
       ${request.tiers.map((tier) => tierCard(request, tier)).join("\n      ")}
@@ -96,7 +101,7 @@ module.exports = function customerRoutes({ pool }) {
       if (quote && quote.status === "submitted" && request.status !== "chosen" && request.status !== "closed") {
         await pool.query("update requests set status = 'chosen', chosen_quote_id = $1 where id = $2", [quote.id, request.id]);
       }
-      res.redirect(303, "/r/" + request.token);
+      res.redirect(303, customerPath(request));
     } catch (error) {
       next(error);
     }

@@ -61,7 +61,7 @@ ${body}
 // It should never be mistaken for a page that customers or companies see.
 const OWNER_BRAND = '<a class="brand" href="/admin" aria-label="AT Legacy Services dashboard"><img src="/favicon.svg" alt="" width="36" height="36"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>';
 
-function ownerPage({ title, heading, intro = "", body, tabs, current = "", back = null, signOut = false }) {
+function ownerPage({ title, heading, intro = "", body, tabs, current = "", back = null, signOut = false, refreshSeconds = 0 }) {
   const links = tabs.map(([href, label, key]) => `<a href="${href}"${key === current ? ' aria-current="page"' : ""}>${label}</a>`).join("");
   return `<!doctype html>
 <html lang="en">
@@ -70,7 +70,8 @@ function ownerPage({ title, heading, intro = "", body, tabs, current = "", back 
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dashboard: ${esc(title)} | AT Legacy Services</title>
   <meta name="robots" content="noindex, nofollow">
-  <meta name="theme-color" content="#F2B544">
+  <meta name="theme-color" content="#F2B544">${refreshSeconds ? `
+  <meta http-equiv="refresh" content="${Number(refreshSeconds)}">` : ""}
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="${STYLES}">
   <script src="${SCRIPT}" defer></script>
@@ -114,4 +115,9 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" });
 }
 
-module.exports = { esc, page, ownerPage, briefHtml, formatDate };
+// "Nov 20, 8:05 AM", in the business's own time zone.
+function formatDateTime(value) {
+  return new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
+}
+
+module.exports = { esc, page, ownerPage, briefHtml, formatDate, formatDateTime };

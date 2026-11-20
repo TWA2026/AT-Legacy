@@ -1,5 +1,7 @@
 const express = require("express");
-const { esc, page, ownerPage, briefHtml, formatDate } = require("../lib/html");
+const { esc, page, ownerPage, briefHtml, formatDate, formatDateTime } = require("../lib/html");
+const { SEND_EVENTS, requestRef, customerPath, companyPath, loadActivity } = require("../lib/links");
+const { workbook } = require("../lib/xlsx");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
 const {
@@ -102,6 +104,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   const dashboardHost = hostSignin ? new URL(config.dashboardUrl).hostname : "";
   const WALL_DOWN = "The dashboard is locked. It opens only at its own address, and only while the host\u2019s sign-in wall is on for this service (in Slipway: the service\u2019s Auth setting, Members).";
 
+  const SENT_WORDS = { copied: "Copied", texted: "Texted", emailed: "Emailed", shared: "Shared" };
   const TABS = [["/admin", "Requests", "requests"], ["/admin/partners", "Partners", "partners"], ["/admin/fees", "Fees", "fees"], ["/admin/links", "Links", "links"]];
 
   function adminPage(req, view) {
@@ -110,21 +113,34 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
 
   // A link the owner sends to someone: the address with a Copy button, then ways to send or open it.
   // `readable` shows the whole address as text. Use it for the short, fixed pages; private links are too long to read.
-  function linkRow({ id, label, link, note = "", textTo = "", emailTo = "", message = "", subject = "AT Legacy Services", who = "", open = "", share = true, readable = false }) {
+  // `track` ties the row to a request (and a quote, for a company's link), so the dashboard can record each send.
+  // `activity` is what has happened to the link so far.
+  function linkRow({ id, label, link, note = "", textTo = "", emailTo = "", message = "", subject = "AT Legacy Services", who = "", open = "", share = true, readable = false, track = null, activity = null }) {
     const actions = [];
+    const sends = (event) => (track ? ` data-track-event="${event}"` : "");
     const sms = textLink(textTo, message + " " + link);
     const mail = emailLink(emailTo, subject, message + "\n\n" + link);
-    if (sms) actions.push(`<li><a href="${esc(sms)}">Text it to ${esc(who || textTo)}</a></li>`);
-    if (mail) actions.push(`<li><a href="${esc(mail)}">Email it to ${esc(who || emailTo)}</a></li>`);
+    if (sms) actions.push(`<li><a href="${esc(sms)}"${sends("texted")}>Text it to ${esc(who || textTo)}</a></li>`);
+    if (mail) actions.push(`<li><a href="${esc(mail)}"${sends("emailed")}>Email it to ${esc(who || emailTo)}</a></li>`);
     if (share) actions.push(`<li hidden><button class="text-button" type="button" data-share-url="${esc(link)}" data-share-text="${esc(message)}">Share it another way</button></li>`);
-    if (open) actions.push(`<li><a href="${esc(link)}" target="_blank" rel="noopener">${esc(open)}</a></li>`);
+    // The owner's own look carries ?owner=1, so it isn't counted as the other person opening the link.
+    if (open) actions.push(`<li><a href="${esc(link + (track ? "?owner=1" : ""))}" target="_blank" rel="noopener">${esc(open)}</a></li>`);
     const field = readable
       ? `<p class="link-name" id="${id}-name">${label}</p>
         <div class="copy-row copy-readable"><span class="link-address" id="${id}">${esc(link.replace(/^https?:\/\//, "").replace(/\/$/, "")).replace(/\//g, "<wbr>/")}</span><button class="secondary" type="button" data-copy-text="${esc(link)}" aria-describedby="${id}-name">Copy</button></div>`
       : `<label for="${id}">${label}</label>
-        <div class="copy-row"><input id="${id}" type="text" readonly value="${esc(link)}"><button class="secondary" type="button" data-copy="${id}">Copy</button></div>`;
-    return `<div class="link-row">
+        <div class="copy-row"><input id="${id}" type="text" readonly value="${esc(link)}"><button class="secondary" type="button" data-copy="${id}"${sends("copied")}>Copy</button></div>
+        <p class="link-ends">Ends in <strong>${esc(link.slice(link.lastIndexOf("/") + 1))}</strong></p>`;
+    let history = "";
+    if (activity) {
+      const sent = activity.last_send ? SENT_WORDS[activity.last_send] + " " + formatDateTime(activity.last_sent_at) + "." : "Not sent from here yet.";
+      const opened = activity.opens ? "Opened " + plural(activity.opens, "time", "times") + ", last " + formatDateTime(activity.last_opened) + "." : "Not opened yet.";
+      history = `<p class="link-activity">${esc(sent)} ${esc(opened)}</p>`;
+    }
+    const tracking = track ? ` data-track="${Number(track.request)}"${track.quote ? ` data-track-quote="${Number(track.quote)}"` : ""} data-csrf="__CSRF__"` : "";
+    return `<div class="link-row"${tracking}>
         ${field}
+        ${history}
         ${note ? `<p class="link-note">${note}</p>` : ""}
         ${actions.length ? `<ul class="link-actions">${actions.join("")}</ul>` : ""}
       </div>`;
@@ -313,7 +329,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
 
       const rows = items.map(({ r, quotes, step }) => `<li class="owner-row${step.needsYou ? " needs-you" : ""}">
           <a class="owner-row-main" href="/admin/requests/${r.id}">${esc(r.service)} <span>for ${esc(r.name)}</span></a>
-          <p class="owner-row-facts">${esc(r.location)}<br>Received ${esc(formatDate(r.created_at))}</p>
+          <p class="owner-row-facts">${requestRef(r.id)}, ${esc(r.location)}<br>Received ${esc(formatDate(r.created_at))}</p>
           <p class="owner-row-state">${pill(r.status)} <span>${quotes.filter((q) => q.status === "submitted").length} of ${plural(r.tiers.length, "quote", "quotes")} in</span></p>
           ${r.status === "closed" ? "" : `<p class="owner-row-next">${esc(step.short)}</p>`}
         </li>`).join("\n");
@@ -328,7 +344,8 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
     </section>
     ${rows ? `<ul class="owner-list">
 ${rows}
-    </ul>` : `<p class="owner-empty">No requests yet. They appear here as soon as a customer sends one. Your request form is on the <a href="/admin/links">Links</a> tab.</p>`}`
+    </ul>
+    <p class="owner-actions owner-sheet-links"><a class="secondary" href="/admin/tracker">Open the spreadsheet view</a> <a class="secondary" href="/admin/tracker.xlsx">Download for Excel</a></p>` : `<p class="owner-empty">No requests yet. They appear here as soon as a customer sends one. Your request form is on the <a href="/admin/links">Links</a> tab.</p>`}`
       }));
     } catch (error) {
       next(error);
@@ -349,6 +366,7 @@ ${rows}
       )).rows;
       const open = r.status !== "chosen" && r.status !== "closed";
       const step = nextStep(r, quotes);
+      const activity = await loadActivity(pool, [r.id]);
 
       const tiers = r.tiers.map((tier) => {
         const quote = quotes.find((item) => item.tier === tier);
@@ -366,7 +384,7 @@ ${rows}
           </form>` : '<p class="quote-wait">No verified partners yet. <a href="/admin/partners">Add or verify one</a>.</p>'}
         </li>`;
         }
-        const link = siteUrl(req) + "/q/" + quote.token;
+        const link = siteUrl(req) + companyPath({ token: quote.token, requestId: r.id, tier: quote.tier, company: quote.company });
         const chosen = r.chosen_quote_id === quote.id;
         return `<li class="quote-card${chosen ? " is-chosen" : ""}"><h3>${esc(tier)}</h3>
           <p class="quote-company">${esc(quote.company)}</p>
@@ -382,13 +400,15 @@ ${rows}
             who: firstName(quote.contact_name),
             subject: r.service + " job to quote",
             message: "AT Legacy Services has a " + r.service.toLowerCase() + " job for you to quote in " + r.location + ". The details and your quote form are here:",
-            open: "Open the company’s page"
+            open: "Open the company’s page",
+            track: { request: r.id, quote: quote.id },
+            activity: activity.company(quote.id)
           })}
           ${open && quote.status !== "submitted" ? `<form method="post" action="/admin/requests/${r.id}/uninvite">${csrfField}<input type="hidden" name="quote" value="${quote.id}"><button class="text-button" type="submit">Remove this company</button></form>` : ""}
         </li>`;
       }).join("\n");
 
-      const customerLink = siteUrl(req) + "/r/" + r.token;
+      const customerLink = siteUrl(req) + customerPath(r);
       const callTo = dial(r.phone);
       const mailTo = emailLink(r.email, "Your " + r.service.toLowerCase() + " request", "");
       res.send(adminPage(req, {
@@ -396,11 +416,11 @@ ${rows}
         back: { href: "/admin", label: "Back to all requests" },
         title: r.service + " request",
         heading: r.service + " for " + r.name,
-        intro: "Received " + formatDate(r.created_at) + ". " + (STATUS_LABELS[r.status] || r.status) + ".",
+        intro: "Reference " + requestRef(r.id) + ". Received " + formatDate(r.created_at) + ". " + (STATUS_LABELS[r.status] || r.status) + ".",
         body: `    <p class="owner-next${step.needsYou ? " needs-you" : ""}"><strong>Next:</strong> ${esc(step.long)}</p>
     <section class="app-section">
       <h2>Quotes</h2>
-      <p class="form-note">Each company gets its own link. Its page shows the job brief and a form for their price. It never shows the customer&rsquo;s name or number.</p>
+      <p class="form-note">Each company gets its own link. Its page shows the job brief and a form for their price. It never shows the customer&rsquo;s name or number. Every link ends with this request&rsquo;s reference and who it is for, so you can check it before you send it.</p>
       <ul class="quote-cards">
 ${tiers}
       </ul>
@@ -423,7 +443,9 @@ ${tiers}
         who: firstName(r.name),
         subject: "Your " + r.service.toLowerCase() + " quotes",
         message: "Hi " + firstName(r.name) + ", this is AT Legacy Services. Your " + r.service.toLowerCase() + " quotes show up on your private page:",
-        open: "Open the customer’s page"
+        open: "Open the customer’s page",
+        track: { request: r.id },
+        activity: activity.customer(r.id)
       })}
     </section>
     <section class="app-section">
@@ -440,6 +462,24 @@ ${tiers}
       </form>
     </section>`
       }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The dashboard reports each time a private link is copied, texted, emailed, or shared.
+  router.post("/link-events", async (req, res, next) => {
+    try {
+      const body = req.body || {};
+      const requestId = Number(body.request) || 0;
+      const quoteId = Number(body.quote) || null;
+      if (!SEND_EVENTS.includes(body.event)) return res.status(400).end();
+      const known = quoteId
+        ? await pool.query("select 1 from quotes where id = $1 and request_id = $2", [quoteId, requestId])
+        : await pool.query("select 1 from requests where id = $1", [requestId]);
+      if (!known.rows.length) return res.status(404).end();
+      await pool.query("insert into link_events (request_id, quote_id, event) values ($1, $2, $3)", [requestId, quoteId, body.event]);
+      res.status(204).end();
     } catch (error) {
       next(error);
     }
@@ -681,7 +721,7 @@ ${rows}
         if (job.fee_paid) paid += fee; else owed += fee;
         return `<li class="owner-row fee-row${job.fee_paid ? "" : " needs-you"}">
             <a class="owner-row-main" href="/admin/requests/${job.r_id}">${esc(job.service)} <span>for ${esc(job.customer_name)}</span></a>
-            <p class="owner-row-facts">${esc(job.company)}<br>Quoted ${esc(formatDollars(job.amount_cents))} at ${esc(Number(job.fee_percent))}%</p>
+            <p class="owner-row-facts">${requestRef(job.r_id)}, ${esc(job.company)}<br>Quoted ${esc(formatDollars(job.amount_cents))} at ${esc(Number(job.fee_percent))}%</p>
             <p class="owner-row-state"><strong class="fee-amount">${esc(formatDollars(fee))}</strong> <span>${job.fee_paid ? "Paid" : "Owed to you"}</span></p>
             <form method="post" action="/admin/fees/${job.id}" class="fee-form">
               ${csrfField}
@@ -707,6 +747,173 @@ ${rows}
     }
   });
 
+  // The tracker: every open request in one sheet, on a page and as an Excel file.
+  // Both are built from the database at the moment they are asked for, so they are always current.
+  const TIER_COLUMNS = [...TIERS, OWN_CREW_TIER];
+
+  async function trackerItems(req) {
+    const requests = (await pool.query("select * from requests order by created_at, id limit 5000")).rows;
+    const ids = requests.map((r) => r.id);
+    const quotes = ids.length ? (await pool.query(
+      `select q.*, p.company, p.contact_name, p.phone as partner_phone, p.email as partner_email
+         from quotes q join partners p on p.id = q.partner_id
+        where q.request_id = any($1::int[]) order by q.id`, [ids]
+    )).rows : [];
+    const activity = await loadActivity(pool, ids);
+    const dashboard = req.protocol + "://" + req.get("host");
+    return requests.map((r) => {
+      const mine = quotes.filter((q) => q.request_id === r.id);
+      const prices = mine.filter((q) => q.status === "submitted").map((q) => Number(q.amount_cents));
+      return {
+        r,
+        ref: requestRef(r.id),
+        quotes: mine,
+        chosen: mine.find((q) => q.id === r.chosen_quote_id) || null,
+        step: nextStep(r, mine),
+        quotesIn: prices.length,
+        lowest: prices.length ? Math.min(...prices) : null,
+        daysOpen: Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000),
+        customerLink: siteUrl(req) + customerPath(r),
+        customerActivity: activity.customer(r.id),
+        activity,
+        page: dashboard + "/admin/requests/" + r.id
+      };
+    });
+  }
+
+  // What one tier's cell says: who has it, and where it stands.
+  function tierCell(item, tier) {
+    if (!item.r.tiers.includes(tier)) return "";
+    const quote = item.quotes.find((q) => q.tier === tier);
+    if (!quote) return "No company yet";
+    if (quote.status === "submitted") return quote.company + ": " + formatDollars(quote.amount_cents);
+    return quote.company + ": " + STATUS_LABELS[quote.status].toLowerCase();
+  }
+
+  router.get("/tracker", async (req, res, next) => {
+    try {
+      const items = (await trackerItems(req)).filter((item) => item.r.status !== "closed");
+      const rows = items.map((item) => {
+        const r = item.r;
+        const callTo = dial(r.phone);
+        return `<tr${item.step.needsYou ? ' class="needs-you"' : ""}>
+            <th scope="row"><a href="/admin/requests/${r.id}">${item.ref}</a></th>
+            <td>${esc(formatDateTime(r.created_at))}</td>
+            <td class="num">${item.daysOpen}</td>
+            <td>${esc(r.service)}</td>
+            <td>${esc(r.name)}</td>
+            <td>${callTo ? `<a href="tel:${esc(callTo)}">${esc(r.phone)}</a>` : esc(r.phone)}</td>
+            <td>${esc(r.location)}</td>
+            <td>${esc(STATUS_LABELS[r.status])}</td>
+            <td>${esc(item.step.short)}</td>
+            <td class="num">${item.quotesIn} of ${r.tiers.length}</td>
+            ${TIER_COLUMNS.map((tier) => `<td>${esc(tierCell(item, tier))}</td>`).join("")}
+            <td>${item.customerActivity.opens ? esc(formatDateTime(item.customerActivity.last_opened)) : "Not yet"}</td>
+          </tr>`;
+      }).join("\n");
+      res.send(adminPage(req, {
+        current: "requests",
+        back: { href: "/admin", label: "Back to all requests" },
+        refreshSeconds: 60,
+        title: "Open requests",
+        heading: "Every open request",
+        intro: plural(items.length, "open request", "open requests") + ". Read from the site at " + formatDateTime(new Date()) + ". This page reloads itself every minute.",
+        body: `    <p class="owner-actions"><a class="primary" href="/admin/tracker.xlsx">Download for Excel</a></p>
+    ${rows ? `<div class="tracker-wrap" tabindex="0" role="region" aria-label="Open requests, one row each">
+      <table class="tracker">
+        <thead><tr><th scope="col">Ref</th><th scope="col">Received</th><th scope="col">Days open</th><th scope="col">Service</th><th scope="col">Customer</th><th scope="col">Phone</th><th scope="col">Where</th><th scope="col">Status</th><th scope="col">Next step</th><th scope="col">Quotes in</th>${TIER_COLUMNS.map((tier) => `<th scope="col">${esc(tier)}</th>`).join("")}<th scope="col">Customer last opened their page</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table>
+    </div>
+    <p class="form-note owner-lead">Swipe sideways to see every column. The Excel file has the same list, plus a sheet of every company quote and a sheet of all requests, closed ones included.</p>` : '<p class="owner-empty">No open requests right now.</p>'}`
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/tracker.xlsx", async (req, res, next) => {
+    try {
+      const all = await trackerItems(req);
+      const open = all.filter((item) => item.r.status !== "closed");
+      const ending = (link) => link.slice(link.lastIndexOf("/") + 1);
+      const file = workbook([
+        {
+          name: "Open requests",
+          columns: [
+            { header: "Ref", type: "link", width: 9 }, { header: "Received", type: "datetime", width: 21 }, { header: "Days open", type: "int", width: 11 },
+            { header: "Service", width: 24 }, { header: "Customer", width: 22 }, { header: "Phone", width: 16 }, { header: "Email", width: 26 },
+            { header: "Where", width: 22 }, { header: "Timing", width: 18 }, { header: "Status", width: 17 }, { header: "Next step", width: 30 },
+            { header: "Quotes in", type: "int", width: 11 }, { header: "Quotes asked for", type: "int", width: 16 }, { header: "Lowest quote", type: "money", width: 14 },
+            ...TIER_COLUMNS.map((tier) => ({ header: tier, width: 34 })),
+            { header: "Customer's link", type: "link", width: 22 }, { header: "Customer opened it", type: "int", width: 18 }, { header: "Last opened", type: "datetime", width: 21 }
+          ],
+          rows: open.map((item) => [
+            { text: item.ref, url: item.page }, item.r.created_at, item.daysOpen,
+            item.r.service, item.r.name, item.r.phone, item.r.email,
+            item.r.location, item.r.timing, STATUS_LABELS[item.r.status], item.step.short,
+            item.quotesIn, item.r.tiers.length, item.lowest,
+            ...TIER_COLUMNS.map((tier) => tierCell(item, tier)),
+            { text: ending(item.customerLink), url: item.customerLink }, item.customerActivity.opens, item.customerActivity.last_opened
+          ])
+        },
+        {
+          name: "Company quotes",
+          columns: [
+            { header: "Ref", type: "link", width: 9 }, { header: "Service", width: 24 }, { header: "Tier", width: 12 }, { header: "Company", width: 26 },
+            { header: "Contact", width: 18 }, { header: "Phone", width: 16 }, { header: "Email", width: 26 }, { header: "Status", width: 18 },
+            { header: "Price", type: "money", width: 13 }, { header: "Timeline", width: 22 }, { header: "Included", width: 40 }, { header: "Warranty", width: 20 },
+            { header: "Asked", type: "datetime", width: 21 }, { header: "Answered", type: "datetime", width: 21 },
+            { header: "Last sent how", width: 14 }, { header: "Last sent", type: "datetime", width: 21 },
+            { header: "Company opened it", type: "int", width: 18 }, { header: "Last opened", type: "datetime", width: 21 }, { header: "Company's link", type: "link", width: 36 }
+          ],
+          rows: open.flatMap((item) => item.quotes.map((quote) => {
+            const seen = item.activity.company(quote.id);
+            const link = siteUrl(req) + companyPath({ token: quote.token, requestId: item.r.id, tier: quote.tier, company: quote.company });
+            return [
+              { text: item.ref, url: item.page }, item.r.service, quote.tier, quote.company,
+              quote.contact_name, quote.partner_phone, quote.partner_email, STATUS_LABELS[quote.status] + (item.r.chosen_quote_id === quote.id ? ", chosen" : ""),
+              quote.status === "submitted" ? quote.amount_cents : null, quote.timeline, quote.includes, quote.warranty,
+              quote.created_at, quote.submitted_at,
+              seen.last_send ? SENT_WORDS[seen.last_send] : "", seen.last_sent_at,
+              seen.opens, seen.last_opened, { text: ending(link), url: link }
+            ];
+          }))
+        },
+        {
+          name: "All requests",
+          columns: [
+            { header: "Ref", type: "link", width: 9 }, { header: "Received", type: "datetime", width: 21 }, { header: "Service", width: 24 },
+            { header: "Customer", width: 22 }, { header: "Phone", width: 16 }, { header: "Where", width: 22 }, { header: "Status", width: 17 },
+            { header: "Chosen company", width: 26 }, { header: "Quoted", type: "money", width: 13 }, { header: "Final total", type: "money", width: 13 },
+            { header: "Fee %", type: "number", width: 8 }, { header: "Fee", type: "money", width: 12 }, { header: "Fee paid", width: 10 }
+          ],
+          rows: all.map((item) => {
+            const won = item.chosen;
+            const total = won ? Number(won.final_amount_cents || won.amount_cents) : null;
+            const percent = won ? Number(won.fee_percent) : null;
+            return [
+              { text: item.ref, url: item.page }, item.r.created_at, item.r.service,
+              item.r.name, item.r.phone, item.r.location, STATUS_LABELS[item.r.status],
+              won ? won.company : "", won ? won.amount_cents : null, won ? won.final_amount_cents : null,
+              won ? percent : null, won ? Math.round(total * percent / 100) : null, won && percent > 0 ? (won.fee_paid ? "Yes" : "No") : ""
+            ];
+          })
+        }
+      ]);
+      const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+      res.set({
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="AT-Legacy-requests-${day}.xlsx"`
+      });
+      res.send(file);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Links: every page of the site and who it is for.
   router.get("/links", (req, res) => {
     const site = siteUrl(req);
@@ -718,6 +925,7 @@ ${rows}
       body: `    <section class="app-section">
       <h2>Yours</h2>
       ${linkRow({ id: "link-dashboard", readable: true, label: "This dashboard", link: site + "/admin", note: "Private. It opens only after you sign in. Every dashboard page has the gold bar at the top.", share: false })}
+      ${linkRow({ id: "link-tracker", readable: true, label: "Spreadsheet of open requests", link: site + "/admin/tracker", note: "Every open request in one sheet, straight from the site. It has a button to download the same list for Excel.", share: false, open: "Open the spreadsheet view" })}
     </section>
     <section class="app-section">
       <h2>For customers</h2>
@@ -731,8 +939,8 @@ ${rows}
     <section class="app-section">
       <h2>Made for each job</h2>
       <dl class="brief">
-        <dt>Customer&rsquo;s private page</dt><dd>One per request. The customer sees their quotes there and chooses. Find the link on the request, under Customer.</dd>
-        <dt>Company&rsquo;s quote page</dt><dd>One per company on each request. The company reads the brief and enters a price. Find the link on the request, under Quotes.</dd>
+        <dt>Customer&rsquo;s private page</dt><dd>One per request. The customer sees their quotes there and chooses. Find the link on the request, under Customer. It ends with the request&rsquo;s reference and their first name, like r1003-dana.</dd>
+        <dt>Company&rsquo;s quote page</dt><dd>One per company on each request. The company reads the brief and enters a price. Find the link on the request, under Quotes. It ends with the reference, the tier, and the company, like r1003-affordable-budget-fence.</dd>
       </dl>
     </section>`
     }));
