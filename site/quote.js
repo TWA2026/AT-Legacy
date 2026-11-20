@@ -14,6 +14,8 @@
   var ownCrew = document.getElementById("own-crew");
   var ownCrewService = "Home repairs and upkeep";
   var reviewed = null;
+  // Set in config.js. Empty when these pages and the API share one address.
+  var api = String(window.ATL_API || "").replace(/\/+$/, "");
 
   // Links from the home page can name a service or a tier.
   var params = new URLSearchParams(window.location.search);
@@ -86,7 +88,7 @@
   }
 
   function post(path, body) {
-    return fetch(path, {
+    return fetch(api + path, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body)
@@ -196,7 +198,7 @@
     sendButton.disabled = true;
     sendButton.textContent = "Sending…";
     post("/api/requests", body).then(function (data) {
-      window.location.href = data.url;
+      window.location.href = api + data.url;
     }, function (error) {
       sendError.textContent = error.message;
       sendError.hidden = false;

@@ -38,6 +38,7 @@ Set these on the service's **Environment** tab in Slipway (see `.env.example`).
 | `FEE_PERCENT` | No | Finder's fee on new quote links. Defaults to 5 |
 | `PUBLIC_URL` | Recommended | The hub's public address, such as `https://atlegacyservices.com`. Used for the sign-in redirect, for links copied from the dashboard, and to keep sign-in cookies HTTPS-only. Defaults to the address you opened the dashboard on |
 | `RESEND_API_KEY`, `NOTIFY_FROM`, `NOTIFY_TO` | No | Emails you when a request or application arrives |
+| `SITE_ORIGINS` | With a static copy | Comma-separated addresses whose pages may send forms to this hub, such as `https://atlegacyservices.com` |
 | `DASHBOARD_URL` | With a dashboard service | The dashboard service's public address. On the public site, `/admin` redirects there |
 | `DASHBOARD_ONLY` | Dashboard service | `1` makes the app serve only `/admin` and the files it loads |
 | `ADMIN_SIGNIN` | Dashboard service | `host` means the host's sign-in wall is the login. Honored only with `DASHBOARD_ONLY=1` and an https `DASHBOARD_URL` |
@@ -62,8 +63,8 @@ The Slipway project runs four services. A push to `main` rebuilds `at-legacy`, `
 
 | Service | What it is | Address |
 | --- | --- | --- |
-| `at-legacy` | The earlier public site, static files in `legacy-site/` | `atlegacyservices.com` until the switch below |
-| `hub` | The quote hub's public side (this app) | Its own Slipway address until the switch below |
+| `at-legacy` | A static copy of the public pages in `site/`, built by `npm run build:site` | `atlegacyservices.com` and `www.atlegacyllc.com` |
+| `hub` | The quote hub (this app): the request API and the private quote pages | Its own Slipway address |
 | `dashboard` | The owner's dashboard (this app with `DASHBOARD_ONLY=1`) | Its own Slipway address, behind Slipway sign-in |
 | `db` | Managed Postgres for the hub, with daily backups | Private |
 
@@ -91,21 +92,35 @@ Without a dashboard service, the dashboard lives at `/admin` on `hub` and stays 
 
 WorkOS handles passwords, email verification, and two-factor codes. The app only checks that the signed-in, verified email is listed in `ADMIN_EMAILS`. Until the WorkOS values are set, `ADMIN_PASSWORD` works as a single-password fallback.
 
-### Switching the domain
+### How the domain serves the site today
 
-`atlegacyservices.com` can serve only one service at a time. When the hub is ready to replace the earlier site, in the Slipway console:
+`atlegacyservices.com` shows the public pages, and the hub does the work behind them:
 
-1. Open `at-legacy`, go to **Networking**, change its address to the Slipway domain, and save. This frees `atlegacyservices.com`.
-2. Open `hub`, go to **Networking**, pick `atlegacyservices.com` in the **Address** row, and save.
+- The `at-legacy` static service serves a copy of `site/` at the domain. `scripts/build-site.js` writes the hub's address into `config.js`, so the request and partner forms send to the hub.
+- The hub lists the domain in `SITE_ORIGINS`, which lets pages at that address call `/api`.
+- After a customer sends a request, they land on their private page at the hub's Slipway address. Partner quote links use that address too (`PUBLIC_URL`).
+- The static service sets the security headers the hub would send, plus permission to call the hub (`headers:` in the spec).
 
-No DNS change is needed. Set `PUBLIC_URL` to `https://atlegacyservices.com` on both `hub` and `dashboard`, and redeploy them. Afterwards, `legacy-site/`, the `at-legacy` service, and the `build` script can be removed.
+To go back to the earlier site, set the `at-legacy` build command to `npm run build` in the Slipway spec and deploy. That serves `legacy-site/`.
+
+### Moving the whole hub onto the domain
+
+Slipway serves static sites and apps from different places. The domain's DNS record currently points at the static one, so the hub itself can't answer at `atlegacyservices.com` yet. Attaching the domain to `hub` before the DNS change takes the site down.
+
+1. In Cloudflare DNS, change the `atlegacyservices.com` record (shown as `@`) to a CNAME for `lb.onslipway.sh`, proxy status **DNS only**. Wait until the site loads without a certificate warning.
+2. In Slipway, remove `atlegacyservices.com` from `at-legacy` (**Networking**, **Also served at**) and add it to `hub` the same way.
+3. Set `PUBLIC_URL` to `https://atlegacyservices.com` on `hub` and `dashboard`, and redeploy them.
+
+After that the private pages are on the domain too, and the `at-legacy` service, `legacy-site/`, and the build scripts can be removed.
 
 ## Files
 
 | Path | Purpose |
 | --- | --- |
 | `site/` | Public pages, styles, fonts, and browser scripts |
-| `legacy-site/` | The earlier public site, served by the `at-legacy` service until the domain switch |
+| `site/config.js` | Tells the forms where the API is. Empty on the hub; the static build fills in the hub's address |
+| `scripts/build-site.js` | Builds the static copy of `site/` that Slipway serves at the domain |
+| `legacy-site/` | The earlier public site, kept as a fallback (`npm run build`) |
 | `site/quote.html`, `site/quote.js` | Request form and brief review |
 | `site/partners.html`, `site/partners.js` | Partner application |
 | `server/index.js`, `server/app.js` | Server start-up and routing |

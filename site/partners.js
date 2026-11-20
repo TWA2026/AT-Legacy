@@ -29,7 +29,7 @@
 
     submitButton.disabled = true;
     submitButton.textContent = "Sending…";
-    fetch("/api/partners", {
+    fetch(String(window.ATL_API || "").replace(/\/+$/, "") + "/api/partners", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body)

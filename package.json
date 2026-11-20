@@ -9,10 +9,14 @@
     "start": "node server/index.js",
     "migrate": "node server/migrate.js",
     "test": "node --test test/flow.test.js",
-    "build": "rm -rf dist && cp -r legacy-site dist"
+    "build": "rm -rf dist && cp -r legacy-site dist",
+    "build:site": "node scripts/build-site.js"
   },
   "dependencies": {
     "express": "^4.21.2",
     "pg": "^8.13.1"
+  },
+  "config": {
+    "hubUrl": "https://hub-00dd216e.onslipway.sh"
   }
 }

@@ -24,6 +24,8 @@ function readConfig(env) {
     dashboardUrl,
     // The host's sign-in wall guards the dashboard. Only honored on a dashboard-only service with an https address.
     hostSignin: env.DASHBOARD_ONLY === "1" && env.ADMIN_SIGNIN === "host" && dashboardUrl.startsWith("https://"),
+    // Other addresses whose pages may call the request API, such as a static copy of the public pages.
+    siteOrigins: new Set((env.SITE_ORIGINS || "").split(",").map((origin) => origin.trim().replace(/\/+$/, "")).filter(Boolean)),
     resendKey: env.RESEND_API_KEY || "",
     notifyFrom: env.NOTIFY_FROM || "",
     notifyTo: env.NOTIFY_TO || ""
@@ -88,6 +90,20 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
       }));
     });
   } else {
+    app.use("/api", (req, res, next) => {
+      // The public pages may be served from another address (SITE_ORIGINS). Let those pages read the answers.
+      // No cookies or logins are involved here, so this opens nothing else.
+      const origin = req.get("origin");
+      if (origin && config.siteOrigins.has(origin)) {
+        res.set("Access-Control-Allow-Origin", origin);
+        res.vary("Origin");
+        if (req.method === "OPTIONS") {
+          res.set({ "Access-Control-Allow-Methods": "POST", "Access-Control-Allow-Headers": "content-type", "Access-Control-Max-Age": "600" });
+          return res.status(204).end();
+        }
+      }
+      next();
+    });
     app.use("/api", require("./routes/public")(shared));
     app.use("/r", privatePage, require("./routes/customer")(shared));
     app.use("/q", privatePage, require("./routes/partner")(shared));

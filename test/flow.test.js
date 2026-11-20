@@ -7,6 +7,9 @@ const { createPool, migrate, loadSecret } = require("../server/db");
 const { createApp, readConfig } = require("../server/app");
 const { parseAiBrief } = require("../server/lib/brief");
 const { dollarsToCents, formatDollars } = require("../server/lib/validate");
+const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const DATABASE_URL = process.env.TEST_DATABASE_URL || "postgres://atl:atl@localhost:5432/atl_test";
 
@@ -399,6 +402,78 @@ test("the dashboard as its own service opens only behind the host's sign-in wall
   }
   assert.equal((await hub.get("/")).status, 200);
   assert.equal((await hub.form("/admin/login", { password: "correct horse" })).status, 302);
+});
+
+test("pages served from another address can call the request API", async () => {
+  const site = await start({ SITE_ORIGINS: "https://www.example.test, https://second.example.test/" });
+  const allowed = "https://www.example.test";
+  const call = (path, origin, body) => fetch(site.base + path, {
+    method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body)
+  });
+  const ask = (path, origin) => fetch(site.base + path, {
+    method: "OPTIONS", headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "content-type" }
+  });
+
+  // The browser asks first, then sends.
+  const preflight = await ask("/api/brief", allowed);
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), allowed);
+  assert.equal(preflight.headers.get("access-control-allow-methods"), "POST");
+  assert.equal(preflight.headers.get("access-control-allow-headers"), "content-type");
+  const brief = await call("/api/brief", allowed, JOB);
+  assert.equal(brief.status, 200);
+  assert.equal(brief.headers.get("access-control-allow-origin"), allowed);
+  assert.match(brief.headers.get("vary"), /Origin/);
+  assert.equal(brief.headers.get("access-control-allow-credentials"), null);
+  const reviewed = await brief.json();
+
+  // The whole request goes through, and error messages can be read too.
+  const sent = await call("/api/requests", allowed, { ...JOB, ...CONTACT, brief: reviewed.brief, signature: reviewed.signature });
+  assert.equal(sent.status, 201);
+  assert.equal(sent.headers.get("access-control-allow-origin"), allowed);
+  assert.match((await sent.json()).url, /^\/r\//);
+  const invalid = await call("/api/requests", allowed, { service: "Fence" });
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.headers.get("access-control-allow-origin"), allowed);
+  assert.equal((await ask("/api/partners", "https://second.example.test")).headers.get("access-control-allow-origin"), "https://second.example.test");
+
+  // Any other site gets no permission, and neither does anyone on the private pages.
+  for (const origin of ["https://elsewhere.example.test", "https://www.example.test.evil.test", "null"]) {
+    assert.equal((await ask("/api/brief", origin)).headers.get("access-control-allow-origin"), null, origin);
+    assert.equal((await call("/api/brief", origin, JOB)).headers.get("access-control-allow-origin"), null, origin);
+  }
+  for (const path of ["/admin/login", "/r/anything", "/q/anything", "/"]) {
+    assert.equal((await site.get(path, { origin: allowed })).headers.get("access-control-allow-origin"), null, path);
+  }
+  // Without the setting, no other address is let in.
+  const plain = await start();
+  assert.equal((await fetch(plain.base + "/api/brief", { method: "OPTIONS", headers: { origin: allowed } })).headers.get("access-control-allow-origin"), null);
+
+  // Served by the hub itself, the pages use the hub's own address.
+  const config = await site.get("/config.js");
+  assert.equal(config.status, 200);
+  assert.match(await config.text(), /window\.ATL_API = "";/);
+});
+
+test("the static copy of the public pages is built to send to the hub", () => {
+  const root = path.join(__dirname, "..");
+  const build = (hub) => spawnSync(process.execPath, ["scripts/build-site.js"], { cwd: root, env: { ...process.env, HUB_URL: hub }, encoding: "utf8" });
+  assert.equal(build("ftp://hub.example.test").status, 1);
+  assert.equal(build("https://hub.example.test/some/path").status, 1);
+  const built = build("https://hub.example.test/");
+  assert.equal(built.status, 0, built.stderr);
+  const dist = path.join(root, "dist");
+  assert.equal(fs.readFileSync(path.join(dist, "config.js"), "utf8"), 'window.ATL_API = "https://hub.example.test";\n');
+  for (const file of ["index.html", "quote.html", "partners.html", "404.html", "quote.js", "partners.js", "home.js", "styles.css", "favicon.svg", "og.png", "robots.txt", "sitemap.xml", "fonts/public-sans-latin-400-normal.woff2"]) {
+    assert.ok(fs.existsSync(path.join(dist, file)), file);
+  }
+  assert.ok(!fs.existsSync(path.join(dist, "app.js")));
+  // config.js loads before the script that reads it.
+  for (const page of ["quote", "partners"]) {
+    const html = fs.readFileSync(path.join(dist, page + ".html"), "utf8");
+    assert.ok(html.indexOf('src="config.js"') > 0 && html.indexOf('src="config.js"') < html.indexOf('src="' + page + '.js"'), page);
+  }
+  fs.rmSync(dist, { recursive: true, force: true });
 });
 
 test("partner application and verification rules", async () => {

@@ -2,8 +2,8 @@ version: 1
 
 # What runs on Slipway for this repo:
 #
-#   at-legacy  The earlier public site (static files in legacy-site/).
-#              It serves atlegacyservices.com until the hub takes over.
+#   at-legacy  A static copy of the public pages in site/, served at
+#              atlegacyservices.com. Its forms send to the hub.
 #   hub        The quote hub's public side: pages, request API, and the private
 #              quote pages for customers and partners.
 #   dashboard  The owner's dashboard. Same app, serving only /admin, behind
@@ -14,7 +14,8 @@ version: 1
 #
 # Slipway keeps its own copy of this spec for the project, and that copy is
 # what deploys. A change here needs the same change there. Custom domains and
-# the address settings (PUBLIC_URL, DASHBOARD_URL) are also set in Slipway. See "Deploy on Slipway" in README.md.
+# the address settings (PUBLIC_URL, DASHBOARD_URL, SITE_ORIGINS) are also set
+# in Slipway. See "Deploy on Slipway" in README.md.
 
 services:
   - name: at-legacy
@@ -22,8 +23,16 @@ services:
     rootDir: .
     runtime: node
     runtimeVersion: "22"
-    buildCommand: npm run build
+    buildCommand: npm run build:site
     publish: dist
+    # The same protections the hub sends with its own pages, plus permission to call the hub.
+    headers:
+      - for: /*
+        values:
+          Content-Security-Policy: "default-src 'self'; img-src 'self' data:; connect-src 'self' https://hub-00dd216e.onslipway.sh; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+          X-Content-Type-Options: nosniff
+          X-Frame-Options: DENY
+          Referrer-Policy: no-referrer
 
   - name: hub
     rootDir: .
