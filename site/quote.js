@@ -51,8 +51,26 @@
     tierHelp.hidden = own;
     ownCrew.hidden = !own;
   }
-  form.elements.service.addEventListener("change", showTiers);
+
+  // Under the service picker, show what the chosen service can include.
+  var serviceInfoBox = document.getElementById("service-infos");
+  var serviceInfos = Array.prototype.slice.call(serviceInfoBox.querySelectorAll(".service-info"));
+  function showServiceInfo() {
+    var chosen = value("service");
+    var shown = false;
+    serviceInfos.forEach(function (info) {
+      info.hidden = info.getAttribute("data-service") !== chosen;
+      if (!info.hidden) shown = true;
+    });
+    serviceInfoBox.hidden = !shown;
+  }
+
+  form.elements.service.addEventListener("change", function () {
+    showTiers();
+    showServiceInfo();
+  });
   showTiers();
+  showServiceInfo();
 
   form.addEventListener("input", function () {
     errorBox.hidden = true;

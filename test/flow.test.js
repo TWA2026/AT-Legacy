@@ -505,6 +505,32 @@ test("the static copy of the public pages is built to send to the hub", () => {
   fs.rmSync(dist, { recursive: true, force: true });
 });
 
+test("the request form says what each service can include, and the companies page explains the tiers", () => {
+  const { SERVICE_NAMES, TIERS } = require("../server/lib/catalog");
+  const site = path.join(__dirname, "..", "site");
+  const form = fs.readFileSync(path.join(site, "quote.html"), "utf8");
+  // One block of examples for each service in the catalog, hidden until that service is chosen.
+  const described = [...form.matchAll(/<div class="service-info" data-service="([^"]+)" hidden>([\s\S]*?)<p class="help">/g)];
+  assert.deepEqual(described.map((block) => block[1]).sort(), SERVICE_NAMES.filter((name) => name !== "Something else").sort());
+  for (const [, name, body] of described) {
+    assert.ok((body.match(/<li>/g) || []).length >= 3, name);
+    assert.match(body, /class="service-info-title">[^<]+ can include</, name);
+  }
+  // Every service the form offers is one the catalog knows.
+  const offered = [...form.slice(form.indexOf('<select id="service"'), form.indexOf("</select>")).matchAll(/<option>([^<]+)<\/option>/g)].map((option) => option[1]);
+  assert.deepEqual(offered.slice().sort(), SERVICE_NAMES.slice().sort());
+
+  const companies = fs.readFileSync(path.join(site, "partners.html"), "utf8");
+  const tiers = companies.slice(companies.indexOf('id="tiers-title"'), companies.indexOf('id="place-title"'));
+  for (const tier of TIERS) {
+    assert.ok(tiers.includes("<h3>" + tier + "</h3>"), tier);
+  }
+  assert.equal((tiers.match(/You fit here if/g) || []).length, TIERS.length);
+  assert.equal((tiers.match(/Why it works for you/g) || []).length, TIERS.length);
+  // The link above the tiers jumps to the application form further down the page.
+  assert.ok(companies.includes('href="#partner-form"') && companies.includes('id="partner-form"'));
+});
+
 test("partner application and verification rules", async () => {
   const site = await start();
   const application = {

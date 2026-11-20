@@ -628,6 +628,27 @@ html {
   border-top: 0;
 }
 
+/* On the For companies page each block also says who fits the tier and why it works for them. */
+.tier-pitch {
+  margin: 0;
+  padding: 18px 22px 0;
+  font-family: var(--slab);
+  font-size: 1.3rem;
+  line-height: 1.2;
+}
+
+.tier-label {
+  margin: 0;
+  padding: 14px 22px 0;
+  color: var(--slate);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.tiers-even {
+  align-items: stretch;
+}
+
 /* Services: a ruled index. Each pictogram is a small swatch of the same plan drawing. */
 .cats {
   display: grid;
@@ -850,7 +871,7 @@ html {
   display: grid;
   gap: 0;
   max-width: 760px;
-  margin: 0 0 44px;
+  margin: 0 0 22px;
   padding: 0;
   list-style: none;
   border-top: 2px solid var(--navy);
@@ -873,7 +894,75 @@ html {
   color: var(--slate);
 }
 
+.partner-jump {
+  margin: 0 0 52px;
+}
+
+.partner-part {
+  display: grid;
+  gap: 20px;
+  max-width: 760px;
+  margin: 0 0 56px;
+}
+
+.partner-part h2 {
+  font-size: clamp(1.8rem, 5vw, 2.4rem);
+}
+
+/* The three tier blocks get more room than the form's column. */
+.partner-wide {
+  max-width: 1100px;
+}
+
+/* What the chosen service can include, shown under the service picker on the request form */
+.service-info {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-left: 6px solid var(--glass);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.service-info .pic {
+  grid-row: auto;
+}
+
+.service-info-title {
+  margin: 0 0 6px;
+  font-family: var(--slab);
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+
+.service-info ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.service-info li {
+  padding: 5px 0 5px 22px;
+  background: linear-gradient(var(--gold), var(--gold)) 0 0.95em / 12px 3px no-repeat;
+}
+
+.service-info .help {
+  margin: 10px 0 0;
+}
+
 @media (min-width: 720px) {
+  .service-info ul {
+    columns: 2;
+    column-gap: 32px;
+  }
+
+  .service-info li {
+    break-inside: avoid;
+  }
+
   /* Room for the whole drawing: the sheet sits on the neighbor's yard, up to the lot line. */
   .hero-visual {
     display: block;
@@ -926,6 +1015,10 @@ html {
 
   .tier-top .tier-cap {
     min-height: 192px;
+  }
+
+  .tiers-even .tier-cap {
+    min-height: 0;
   }
 
   .cats {
@@ -1294,6 +1387,14 @@ html {
   color: var(--slate);
 }
 
+/* The same numbered steps as a plain list, used on the For companies page */
+.steps-list {
+  display: grid;
+  gap: 36px;
+  margin: 0;
+  padding: 0;
+}
+
 .guarantee {
   display: grid;
   gap: 14px;
@@ -1554,16 +1655,16 @@ html {
     gap: 28px;
   }
 
-  .steps li {
+  .steps-four li {
     grid-template-columns: minmax(0, 1fr);
     row-gap: 14px;
   }
 
-  .steps li::before {
+  .steps-four li::before {
     grid-row: auto;
   }
 
-  .steps li:not(:last-child)::after {
+  .steps-four li:not(:last-child)::after {
     top: 27px;
     right: -20px;
     bottom: auto;
@@ -1572,11 +1673,11 @@ html {
     border-left: 0;
   }
 
-  .steps h3 {
+  .steps-four h3 {
     align-self: start;
   }
 
-  .steps p {
+  .steps-four p {
     grid-column: auto;
     margin: -6px 0 0;
   }

@@ -176,6 +176,8 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 ## Editing the site
 
 - **Services:** change the list in `server/lib/catalog.js`, then match it in the `<select>` in `site/quote.html` and `site/partners.html` and the links in `site/index.html`.
+- **What a service can include:** when a customer picks a service on the request form, a short list of examples appears under it. Each list is a `service-info` block in `site/quote.html`. Keep one block for every service except Something else; the tests check this.
+- **Tiers for companies:** `site/partners.html` says who fits each tier and how a company is placed. Keep it in step with what the home page tells customers about each tier.
 - **Tier wording:** `site/index.html` and `site/quote.html`.
 - **Home page drawing:** the site plan at the top of `site/index.html` is drawn in the page itself, 5 units to the foot. The gold fence measures 200 ft. The label on the drawing and the quote sheet beside it give the same figure, so change all three together.
 - **Service pictograms:** each service link in `site/index.html` has a small drawing before it, on a 48-unit grid. To add a service, copy one and redraw it.
