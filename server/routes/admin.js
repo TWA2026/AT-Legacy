@@ -749,7 +749,10 @@ ${rows}
 
   // The tracker: every open request in one sheet, on a page and as an Excel file.
   // Both are built from the database at the moment they are asked for, so they are always current.
+  // The Excel file names each private link but never holds its address. A file gets passed around,
+  // and the address is what opens the page.
   const TIER_COLUMNS = [...TIERS, OWN_CREW_TIER];
+  const ending = (path) => path.slice(path.lastIndexOf("/") + 1);
 
   async function trackerItems(req) {
     const requests = (await pool.query("select * from requests order by created_at, id limit 5000")).rows;
@@ -760,7 +763,7 @@ ${rows}
         where q.request_id = any($1::int[]) order by q.id`, [ids]
     )).rows : [];
     const activity = await loadActivity(pool, ids);
-    const dashboard = req.protocol + "://" + req.get("host");
+    const dashboard = hostSignin ? config.dashboardUrl : req.protocol + "://" + req.get("host");
     return requests.map((r) => {
       const mine = quotes.filter((q) => q.request_id === r.id);
       const prices = mine.filter((q) => q.status === "submitted").map((q) => Number(q.amount_cents));
@@ -773,7 +776,7 @@ ${rows}
         quotesIn: prices.length,
         lowest: prices.length ? Math.min(...prices) : null,
         daysOpen: Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000),
-        customerLink: siteUrl(req) + customerPath(r),
+        customerLinkName: ending(customerPath(r)),
         customerActivity: activity.customer(r.id),
         activity,
         page: dashboard + "/admin/requests/" + r.id
@@ -838,7 +841,6 @@ ${rows}
     try {
       const all = await trackerItems(req);
       const open = all.filter((item) => item.r.status !== "closed");
-      const ending = (link) => link.slice(link.lastIndexOf("/") + 1);
       const file = workbook([
         {
           name: "Open requests",
@@ -848,7 +850,7 @@ ${rows}
             { header: "Where", width: 22 }, { header: "Timing", width: 18 }, { header: "Status", width: 17 }, { header: "Next step", width: 30 },
             { header: "Quotes in", type: "int", width: 11 }, { header: "Quotes asked for", type: "int", width: 16 }, { header: "Lowest quote", type: "money", width: 14 },
             ...TIER_COLUMNS.map((tier) => ({ header: tier, width: 34 })),
-            { header: "Customer's link", type: "link", width: 22 }, { header: "Customer opened it", type: "int", width: 18 }, { header: "Last opened", type: "datetime", width: 21 }
+            { header: "Customer's link ends in", width: 24 }, { header: "Customer opened it", type: "int", width: 18 }, { header: "Last opened", type: "datetime", width: 21 }
           ],
           rows: open.map((item) => [
             { text: item.ref, url: item.page }, item.r.created_at, item.daysOpen,
@@ -856,7 +858,7 @@ ${rows}
             item.r.location, item.r.timing, STATUS_LABELS[item.r.status], item.step.short,
             item.quotesIn, item.r.tiers.length, item.lowest,
             ...TIER_COLUMNS.map((tier) => tierCell(item, tier)),
-            { text: ending(item.customerLink), url: item.customerLink }, item.customerActivity.opens, item.customerActivity.last_opened
+            item.customerLinkName, item.customerActivity.opens, item.customerActivity.last_opened
           ])
         },
         {
@@ -867,18 +869,18 @@ ${rows}
             { header: "Price", type: "money", width: 13 }, { header: "Timeline", width: 22 }, { header: "Included", width: 40 }, { header: "Warranty", width: 20 },
             { header: "Asked", type: "datetime", width: 21 }, { header: "Answered", type: "datetime", width: 21 },
             { header: "Last sent how", width: 14 }, { header: "Last sent", type: "datetime", width: 21 },
-            { header: "Company opened it", type: "int", width: 18 }, { header: "Last opened", type: "datetime", width: 21 }, { header: "Company's link", type: "link", width: 36 }
+            { header: "Company opened it", type: "int", width: 18 }, { header: "Last opened", type: "datetime", width: 21 }, { header: "Company's link ends in", width: 40 }
           ],
           rows: open.flatMap((item) => item.quotes.map((quote) => {
             const seen = item.activity.company(quote.id);
-            const link = siteUrl(req) + companyPath({ token: quote.token, requestId: item.r.id, tier: quote.tier, company: quote.company });
+            const linkName = ending(companyPath({ token: quote.token, requestId: item.r.id, tier: quote.tier, company: quote.company }));
             return [
               { text: item.ref, url: item.page }, item.r.service, quote.tier, quote.company,
               quote.contact_name, quote.partner_phone, quote.partner_email, STATUS_LABELS[quote.status] + (item.r.chosen_quote_id === quote.id ? ", chosen" : ""),
               quote.status === "submitted" ? quote.amount_cents : null, quote.timeline, quote.includes, quote.warranty,
               quote.created_at, quote.submitted_at,
               seen.last_send ? SENT_WORDS[seen.last_send] : "", seen.last_sent_at,
-              seen.opens, seen.last_opened, { text: ending(link), url: link }
+              seen.opens, seen.last_opened, linkName
             ];
           }))
         },

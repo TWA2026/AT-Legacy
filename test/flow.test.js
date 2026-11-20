@@ -904,7 +904,12 @@ test("the spreadsheet view and the Excel file list every open request, straight 
   assert.ok(openSheet.includes(ref(first).toLowerCase() + "-dana</t>"));
   const openLinks = files["xl/worksheets/_rels/sheet1.xml.rels"];
   assert.ok(openLinks.includes('Target="' + site.base + "/admin/requests/" + first.row.id + '" TargetMode="External"'));
-  assert.ok(openLinks.includes('Target="https://example.test' + first.url + '" TargetMode="External"'));
+  // The file names each private link but holds no address that opens one.
+  for (const [name, xml] of Object.entries(files)) {
+    assert.ok(!xml.includes(first.row.token), name);
+    for (const quote of quotes) assert.ok(!xml.includes(quote.token), name);
+    assert.doesNotMatch(xml, /\/r\/|\/q\//, name);
+  }
   assert.doesNotMatch(openSheet, /Closed Customer/);
 
   // What a customer typed stays text. Nothing in the workbook is a formula.
@@ -917,7 +922,8 @@ test("the spreadsheet view and the Excel file list every open request, straight 
   assert.ok(quoteSheet.includes('<c r="I2" s="4"><v>4950.5</v></c>'));
   assert.ok(quoteSheet.includes("Materials &amp; labor &lt;all&gt;"));
   assert.ok(quoteSheet.includes("Waiting for quote"));
-  assert.ok(files["xl/worksheets/_rels/sheet2.xml.rels"].includes("https://example.test/q/" + quotes[0].token + "/" + ref(first).toLowerCase() + "-affordable-budget-fence-llc"));
+  assert.ok(quoteSheet.includes(">" + ref(first).toLowerCase() + "-affordable-budget-fence-llc</t>"));
+  assert.ok(files["xl/worksheets/_rels/sheet2.xml.rels"].includes('Target="' + site.base + "/admin/requests/" + first.row.id + '" TargetMode="External"'));
 
   // All requests: the closed one too.
   assert.match(allSheet, /<dimension ref="A1:M4"\/>/);

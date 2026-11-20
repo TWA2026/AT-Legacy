@@ -43,7 +43,7 @@ The `link_events` table records when the owner copies, texts, emails, or shares 
 
 ### The spreadsheet of open requests
 
-**Open the spreadsheet view** on the Requests tab shows every open request in one sheet, read from the database when the page loads. The page reloads itself every minute. **Download for Excel** builds a real `.xlsx` file at that moment with three sheets: open requests, every company quote on them, and all requests including closed ones. Dates and money are real numbers, the header row is frozen with filters on, and references and links are clickable.
+**Open the spreadsheet view** on the Requests tab shows every open request in one sheet, read from the database when the page loads. The page reloads itself every minute. **Download for Excel** builds a real `.xlsx` file at that moment with three sheets: open requests, every company quote on them, and all requests including closed ones. Dates and money are real numbers, the header row is frozen with filters on, and each reference opens that request in the dashboard. The file names each private link (`r1003-dana`) but leaves out its address, so a copy that gets passed along can't open anyone's page. It does hold customers' names and phone numbers, so treat it like the dashboard.
 
 `server/lib/xlsx.js` writes the workbook with no outside packages. Everything a person typed is written as text, never as a formula.
 
