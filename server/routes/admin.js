@@ -342,10 +342,10 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       <h2 id="todo-title">Needs you</h2>
       ${todo.length ? `<ul>${todo.join("")}</ul>` : "<p>Nothing right now.</p>"}
     </section>
-    ${rows ? `<ul class="owner-list">
+    ${rows ? `<p class="owner-actions owner-sheet-links"><a class="secondary" href="/admin/tracker">Open the spreadsheet view</a> <a class="secondary" href="/admin/tracker.xlsx">Download for Excel</a></p>
+    <ul class="owner-list">
 ${rows}
-    </ul>
-    <p class="owner-actions owner-sheet-links"><a class="secondary" href="/admin/tracker">Open the spreadsheet view</a> <a class="secondary" href="/admin/tracker.xlsx">Download for Excel</a></p>` : `<p class="owner-empty">No requests yet. They appear here as soon as a customer sends one. Your request form is on the <a href="/admin/links">Links</a> tab.</p>`}`
+    </ul>` : `<p class="owner-empty">No requests yet. They appear here as soon as a customer sends one. Your request form is on the <a href="/admin/links">Links</a> tab.</p>`}`
       }));
     } catch (error) {
       next(error);
@@ -827,7 +827,7 @@ ${rows}
         </tbody>
       </table>
     </div>
-    <p class="form-note owner-lead">Swipe sideways to see every column. The Excel file has the same list, plus a sheet of every company quote and a sheet of all requests, closed ones included.</p>` : '<p class="owner-empty">No open requests right now.</p>'}`
+    <p class="form-note owner-lead">Scroll sideways to see every column. The Excel file has the same list, plus a sheet of every company quote and a sheet of all requests, closed ones included.</p>` : '<p class="owner-empty">No open requests right now.</p>'}`
       }));
     } catch (error) {
       next(error);

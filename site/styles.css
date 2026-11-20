@@ -1945,6 +1945,7 @@ html {
 /* A link the owner sends: the address, a Copy button, and ways to send or open it */
 .link-row {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   width: 100%;
   max-width: 760px;
@@ -2088,7 +2089,6 @@ html {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin: 22px 0 0;
 }
 
 /* Shown on a customer's or company's page when the owner opens it from the dashboard */
