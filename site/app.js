@@ -2,6 +2,7 @@
 // Share buttons: <button data-share-url data-share-text>. Shown only where the phone or browser can share.
 // Send tracking: inside an element with data-track, a click on anything with data-track-event is reported
 // to the dashboard, so it can show when each private link was copied, texted, emailed, or shared.
+// Print buttons: <button data-print> opens the print dialog, where the page can also be saved as a PDF.
 
 function reportSend(element, how) {
   var row = element.closest("[data-track]");
@@ -17,6 +18,11 @@ function reportSend(element, how) {
 document.addEventListener("click", function (event) {
   var sent = event.target.closest("[data-track-event]");
   if (sent) reportSend(sent, sent.getAttribute("data-track-event"));
+
+  if (event.target.closest("[data-print]")) {
+    window.print();
+    return;
+  }
 
   var copy = event.target.closest("[data-copy], [data-copy-text]");
   if (copy) {

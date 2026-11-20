@@ -85,3 +85,10 @@ create table if not exists link_events (
 );
 
 create index if not exists link_events_link_idx on link_events (request_id, quote_id);
+
+-- The owner's certification. `visit` is the last site visit scored against the standard, kept with
+-- the wording of each item as it was that day. Dates are stored as text, 2026-11-20, so a day never
+-- shifts with a time zone. A company is approved on approved_on and due another visit on review_due.
+alter table partners add column if not exists visit jsonb not null default '{}';
+alter table partners add column if not exists approved_on text not null default '';
+alter table partners add column if not exists review_due text not null default '';

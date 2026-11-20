@@ -84,6 +84,45 @@ ${body}
 </html>`;
 }
 
+// The certificate the owner gives an approved company. It stands alone, without the dashboard's frame,
+// so it prints or saves as a PDF cleanly.
+function certificatePage({ company, service, number, approved, validThrough, back, expired = false }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Certificate ${esc(number)}: ${esc(company)} | AT Legacy Services</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#13283A">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="${STYLES}">
+  <script src="${SCRIPT}" defer></script>
+</head>
+<body class="certificate-page">
+  <p class="certificate-actions"><a href="${esc(back)}">Back to the company</a> <button class="secondary" type="button" data-print>Print or save as a PDF</button></p>
+  ${expired ? '<p class="certificate-actions certificate-expired">This certificate&rsquo;s date has passed. Record another visit that meets your standard to renew it.</p>' : ""}
+  <main class="certificate">
+    <p class="lockup">
+      <span class="lockup-name">AT LEGACY</span>
+      <span class="pinstripe" aria-hidden="true"></span>
+      <span class="lockup-sub">SERVICES</span>
+    </p>
+    <h1>Approved vendor certificate</h1>
+    <p class="certificate-line">This certifies that</p>
+    <p class="certificate-company">${esc(company)}</p>
+    <p class="certificate-line">met the AT Legacy Services standard for <strong>${esc(service)}</strong> at a site visit, and is on our approved vendor list.</p>
+    <dl class="certificate-facts">
+      <div><dt>Certificate</dt><dd>${esc(number)}</dd></div>
+      <div><dt>Approved</dt><dd>${esc(approved)}</dd></div>
+      <div><dt>Valid through</dt><dd>${esc(validThrough)}</dd></div>
+    </dl>
+    <p class="certificate-small">Issued by AT Legacy Group LLC. This is AT Legacy Services&rsquo; own standard. It is not a state license, and it does not guarantee any job.</p>
+  </main>
+</body>
+</html>`;
+}
+
 function briefHtml(request) {
   const brief = request.brief || {};
   const scope = (brief.scope || []).map((item) => `<li>${esc(item)}</li>`).join("");
@@ -106,9 +145,17 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" });
 }
 
+// A calendar day stored as 2026-11-20, shown as "Nov 20, 2026". No time zone is involved.
+function formatDay(day) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ""));
+  if (!match) return "";
+  return new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+    .toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
 // "Nov 20, 8:05 AM", in the business's own time zone.
 function formatDateTime(value) {
   return new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
 }
 
-module.exports = { esc, page, ownerPage, briefHtml, formatDate, formatDateTime };
+module.exports = { esc, page, ownerPage, certificatePage, briefHtml, formatDate, formatDateTime, formatDay };

@@ -8,7 +8,7 @@ One Node app serves the public site, the request API, the private customer and p
 
 1. **Customer** fills in `site/quote.html`. The server turns the answers into a job brief (`POST /api/brief`). With an Anthropic API key, Claude writes the brief and may ask up to three follow-up questions. Without one, the brief is built from the answers.
 2. The customer checks the brief and sends it (`POST /api/requests`). They land on a private page, `/r/<token>`, where quotes appear.
-3. **Owner** opens the request in `/admin`, picks one verified partner per tier, and gets a private quote link, `/q/<token>`, to send to each partner.
+3. **Owner** opens the request in `/admin`, picks one approved partner per tier, and gets a private quote link, `/q/<token>`, to send to each partner.
 4. **Partner** opens the link, reads the brief, and enters a price. Partners see the job but not the customer's name or contact details.
 5. **Customer** compares the quotes and chooses one. Only then does the chosen partner's page show the customer's contact details. The customer hires and pays the partner directly.
 6. **Owner** tracks the finder's fee on `/admin/fees`.
@@ -22,7 +22,7 @@ Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "O
 | Tab | What it shows |
 | --- | --- |
 | Requests | What needs the owner, then every request with its next step. Requests that need a company come first |
-| Partners | Companies and their status, applications to review, and the sign-up link to send to a new company |
+| Partners | The approved vendor list, the companies working toward it, the standard, and the sign-up link to send to a new company |
 | Fees | One row per awarded job: the fee, the final total, and whether it's paid |
 | Links | Every fixed page of the site with its address, and who each one is for |
 
@@ -47,10 +47,37 @@ The `link_events` table records when the owner copies, texts, emails, or shares 
 
 `server/lib/xlsx.js` writes the workbook with no outside packages. Everything a person typed is written as text, never as a formula.
 
+### Certification: the approved vendor list
+
+A company gets onto the approved vendor list in three steps, all on the Partners tab.
+
+1. **Paperwork.** On the company's page the owner ticks the checks that apply: registration, license, insurance, references.
+2. **Site visit.** The owner visits a job site or the company's shop and fills in the scorecard on the same page. Each item comes from the standard and is either a must-meet item or worth points.
+3. **Approval.** A visit that meets every must-meet item, plus finished paperwork, lets the owner approve the company. The points suggest its tier, and the owner can give a different one.
+
+**Your standard** (`/admin/standard`) is the owner's own list: each item's wording, whether it is a must-meet item or how many points it is worth, how many points Mid-range and Premium need, and how many months an approval lasts. It starts from a draft in `server/lib/standard.js` and is stored in the `settings` table. A visit keeps the wording it was scored against, so changing the standard later doesn't rewrite old visits.
+
+What the Partners tab shows for each company:
+
+| It says | It means |
+| --- | --- |
+| Check their paperwork and visit a job | A new application |
+| Visit again when they've fixed what was missed | The last visit missed a must-meet item |
+| Finish their paperwork checks | The visit met the standard, but a check isn't ticked yet |
+| Ready to approve | One button on the company's page approves it |
+| Another visit is due | The approval has run its months. The company stays approved until the owner pauses it |
+
+An approved company has a certificate number, such as AV-1004, and a printable certificate at `/admin/partners/<id>/certificate`. **Download the approved list for Excel** builds the list as an `.xlsx` file, with each company's dates, score, and contact details. It holds phone numbers and the owner's visit notes, so treat it like the dashboard.
+
+A later visit that meets the standard renews the approval and sets the tier again. Pausing a company takes it off the list and keeps its dates. Moving it back to Applied withdraws the certification.
+
+The certification is AT Legacy Services' own. The certificate and the For companies page both say it is not a state license. Florida uses "certified contractor" for a state license class, so don't call an approved company "certified" on its own.
+
 ## Rules the code enforces
 
-- A partner can be sent a brief only when their status is Verified.
-- A partner can be marked Verified only after the registration, insurance, and references checks are ticked, plus the license check when the trade needs one (`server/lib/catalog.js`).
+- A partner can be sent a brief only when their status is Approved. The database calls this status `verified`, and the public site calls these companies verified.
+- A partner can be approved only after the registration, insurance, and references checks are ticked, plus the license check when the trade needs one (`server/lib/catalog.js`), and after a site visit that meets every must-meet item of the standard. The owner's own crew is exempt.
+- A scorecard's boxes are named after each item's wording, not its place in the list, so a scorecard opened before the standard changed can't tick the wrong item.
 - Each quote is in the partner's name. The site never sets a price.
 - The AI sees the job description only, never the customer's name, phone, or email. Any AI failure falls back to the plain brief.
 - AI briefs are capped at 300 a day across all visitors.
@@ -162,13 +189,14 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `server/routes/public.js` | Request, brief, and application API |
 | `server/routes/customer.js` | Customer's private quotes page |
 | `server/routes/partner.js` | Partner's private quote page |
-| `server/routes/admin.js` | Dashboard: requests, partners, fees |
+| `server/routes/admin.js` | Dashboard: requests, partners, site visits, the standard, fees |
 | `server/lib/brief.js` | Plain and AI job briefs |
 | `server/lib/catalog.js` | Services, tiers, and which license each service needs |
 | `server/lib/workos.js` | WorkOS AuthKit sign-in for the dashboard |
 | `server/lib/edge.js` | Checks the host's sign-in wall before the dashboard service opens |
 | `server/lib/links.js` | Names for private links, and the record of when each was sent and opened |
-| `server/lib/xlsx.js` | Writes the Excel download |
+| `server/lib/standard.js` | The certification standard: its starting draft, how a site visit is scored, and the tier the points suggest |
+| `server/lib/xlsx.js` | Writes the Excel downloads |
 | `server/lib/stamp.js` | Adds a fingerprint to each page's links to the stylesheet and scripts |
 | `server/lib/security.js` | Tokens, sessions, form tokens, rate limits |
 | `test/flow.test.js` | End-to-end tests |
@@ -177,7 +205,8 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 
 - **Services:** change the list in `server/lib/catalog.js`, then match it in the `<select>` in `site/quote.html` and `site/partners.html` and the links in `site/index.html`.
 - **What a service can include:** when a customer picks a service on the request form, a short list of examples appears under it. Each list is a `service-info` block in `site/quote.html`. Keep one block for every service except Something else; the tests check this.
-- **Tiers for companies:** `site/partners.html` says who fits each tier and how a company is placed. Keep it in step with what the home page tells customers about each tier.
+- **Approval and tiers for companies:** `site/partners.html` says how a company gets approved and how its tier is set. It names a few things the visit looks at, in general words. The real list is the standard in the dashboard, so if the standard changes a lot, reread this page. Keep the tiers in step with what the home page tells customers about each tier.
+- **What verified means:** the list on `site/index.html` tells customers what every company passes, including the site visit. The dashboard enforces each line, so change the two together.
 - **Tier wording:** `site/index.html` and `site/quote.html`.
 - **Home page drawing:** the site plan at the top of `site/index.html` is drawn in the page itself, 5 units to the foot. The gold fence measures 200 ft. The label on the drawing and the quote sheet beside it give the same figure, so change all three together.
 - **Service pictograms:** each service link in `site/index.html` has a small drawing before it, on a 48-unit grid. To add a service, copy one and redraw it.

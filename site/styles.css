@@ -1508,9 +1508,10 @@ html {
   margin: 0;
 }
 
+/* The 14vw cap keeps the name inside the narrowest phones (320px). Wider screens never reach it. */
 .lockup-name {
   font-family: var(--slab);
-  font-size: clamp(3.1rem, 8vw, 7rem);
+  font-size: min(clamp(3.1rem, 8vw, 7rem), 14vw);
   line-height: 0.88;
   white-space: nowrap;
 }
@@ -2699,3 +2700,266 @@ html {
   text-align: right;
 }
 
+/* Certification: the approved vendor list, the site visit, the standard, and the certificate. */
+.partner-group {
+  margin-bottom: 36px;
+}
+
+/* What the last site visit found. A gold edge means a must-meet item was missed. */
+.visit-result {
+  display: grid;
+  gap: 6px;
+  max-width: 760px;
+  padding: 14px 16px;
+  border-left: 6px solid var(--glass);
+  background: var(--white);
+}
+
+.visit-missed {
+  border-left-color: var(--gold);
+}
+
+.visit-approve {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+}
+
+/* A message about the scorecard, shown at the top of the page where it is seen first. */
+.page-alert {
+  max-width: 760px;
+  margin-bottom: 28px;
+}
+
+/* The scorecard. Its parts sit one level below the section's own heading. */
+.visit-form {
+  gap: 30px;
+  margin-top: 22px;
+  padding-top: 26px;
+  border-top: 2px solid var(--navy);
+}
+
+.visit-first {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.app-section > .owner-actions {
+  margin: 0;
+}
+
+.visit-head {
+  display: grid;
+  gap: 12px;
+}
+
+.visit-head h3 {
+  font-size: 1.25rem;
+}
+
+.visit-form .tier-part {
+  gap: 12px;
+}
+
+.visit-form .tier-part legend {
+  margin-bottom: 12px;
+  font-family: inherit;
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.visit-form > .form-note {
+  margin-bottom: -14px;
+}
+
+/* The standard: one row per item, with what it counts as beside it */
+.standard-list {
+  display: grid;
+  gap: 12px;
+  max-width: 760px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.standard-row {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+/* Where the browser can, an item's box grows to fit its words. Elsewhere it keeps the rows it was given. */
+.standard-row textarea {
+  field-sizing: content;
+}
+
+@media (min-width: 720px) {
+  .standard-row {
+    grid-template-columns: minmax(0, 1fr) 180px;
+    align-items: start;
+  }
+}
+
+/* The certificate given to an approved company. It stands alone so it prints cleanly. */
+.certificate-page {
+  padding: clamp(12px, 3vw, 32px);
+  background: var(--shell);
+}
+
+.certificate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  max-width: 900px;
+  margin: 0 auto 16px;
+}
+
+.certificate-actions a {
+  color: var(--navy);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 0.22em;
+}
+
+.certificate-expired {
+  padding: 12px 16px;
+  border-left: 6px solid var(--gold);
+  background: var(--white);
+  font-weight: 600;
+}
+
+.certificate-actions a:focus-visible {
+  outline: 3px solid var(--bay);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.certificate {
+  display: grid;
+  gap: 16px;
+  justify-items: center;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: clamp(34px, 7vw, 68px) clamp(24px, 6vw, 72px);
+  border: 3px solid var(--navy);
+  outline: 2px solid var(--gold);
+  outline-offset: -13px;
+  background: var(--white);
+  text-align: center;
+}
+
+.certificate .lockup {
+  justify-self: center;
+  gap: 6px;
+}
+
+.certificate .lockup-name {
+  font-size: clamp(1.8rem, 6vw, 2.5rem);
+}
+
+.certificate .lockup-sub {
+  font-size: clamp(0.7rem, 2.3vw, 0.9rem);
+}
+
+.certificate .pinstripe {
+  height: 9px;
+  background:
+    linear-gradient(var(--gold), var(--gold)) top / 100% 5px no-repeat,
+    linear-gradient(var(--navy), var(--navy)) bottom / 100% 2px no-repeat;
+}
+
+.certificate h1 {
+  margin: 14px 0 0;
+  font-family: var(--slab);
+  font-size: clamp(1.5rem, 4.6vw, 2.2rem);
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.certificate-line {
+  max-width: 32em;
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.certificate-company {
+  margin: 0;
+  font-family: var(--slab);
+  font-size: clamp(2rem, 7vw, 3.6rem);
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.certificate-facts {
+  display: grid;
+  gap: 14px 40px;
+  width: 100%;
+  margin: 14px 0 0;
+  padding: 20px 0 0;
+  border-top: 2px solid var(--navy);
+}
+
+.certificate-facts div {
+  display: grid;
+  gap: 2px;
+}
+
+.certificate-facts dt {
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+.certificate-facts dd {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.certificate-small {
+  max-width: 44em;
+  margin: 4px 0 0;
+  color: var(--slate);
+  font-size: 0.9rem;
+}
+
+@media (min-width: 620px) {
+  .certificate-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* On paper the certificate takes a sideways page of its own, where the browser supports that. */
+@page certificate {
+  size: landscape;
+  margin: 0.5in;
+}
+
+@media print {
+  .certificate-actions {
+    display: none;
+  }
+
+  .certificate-page {
+    padding: 0;
+    background: var(--white);
+  }
+
+  /* The color rule keeps the gold and navy line under the name when the browser leaves backgrounds out. */
+  .certificate {
+    page: certificate;
+    max-width: none;
+    min-height: 6.6in;
+    align-content: center;
+    break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

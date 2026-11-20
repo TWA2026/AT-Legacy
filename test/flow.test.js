@@ -67,14 +67,33 @@ async function createRequest(site, overrides = {}) {
   return { url, row };
 }
 
+const { itemKey, loadStandard } = require("../server/lib/standard");
+
+// Scorecard boxes are named after each item's wording. These tick the ones named, or every one.
+const tick = (...labels) => Object.fromEntries(labels.map((label) => [itemKey(label), "on"]));
+const everyItem = async () => tick(...(await loadStandard(pool)).items.map((item) => item.label));
+
+function todayInFlorida() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+}
+
+// An approved partner: paperwork checked, then a site visit that meets the standard.
 async function addVerifiedPartner(site, admin, company, tier, trade = "Fence") {
   const response = await site.form("/admin/partners", {
     csrf: admin.csrf, company, contact_name: "Pat Partner", phone: "813-555-0199", email: "pat@example.test",
-    trade, tier, status: "verified",
+    trade, tier, status: "applied",
     check_registration: "on", check_license: "on", check_insurance: "on", check_references: "on"
   }, { cookie: admin.cookie });
   assert.equal(response.status, 303);
-  return (await pool.query("select * from partners where company = $1", [company])).rows[0];
+  const added = (await pool.query("select * from partners where company = $1", [company])).rows[0];
+  const visit = await site.form("/admin/partners/" + added.id + "/visit", {
+    csrf: admin.csrf, visit_on: todayInFlorida(), place: "A job in Connerton", visit_tier: tier, then: "approve", ...(await everyItem())
+  }, { cookie: admin.cookie });
+  assert.equal(visit.status, 303);
+  const approved = (await pool.query("select * from partners where id = $1", [added.id])).rows[0];
+  assert.equal(approved.status, "verified");
+  assert.equal(approved.tier, tier);
+  return approved;
 }
 
 test.before(async () => {
@@ -505,7 +524,7 @@ test("the static copy of the public pages is built to send to the hub", () => {
   fs.rmSync(dist, { recursive: true, force: true });
 });
 
-test("the request form says what each service can include, and the companies page explains the tiers", () => {
+test("the request form says what each service can include, and the companies page explains approval and the tiers", () => {
   const { SERVICE_NAMES, TIERS } = require("../server/lib/catalog");
   const site = path.join(__dirname, "..", "site");
   const form = fs.readFileSync(path.join(site, "quote.html"), "utf8");
@@ -521,14 +540,24 @@ test("the request form says what each service can include, and the companies pag
   assert.deepEqual(offered.slice().sort(), SERVICE_NAMES.slice().sort());
 
   const companies = fs.readFileSync(path.join(site, "partners.html"), "utf8");
-  const tiers = companies.slice(companies.indexOf('id="tiers-title"'), companies.indexOf('id="place-title"'));
+  // How a company gets on the approved vendor list: four steps, ending in the site visit and the certificate.
+  const approval = companies.slice(companies.indexOf('id="approve-title"'), companies.indexOf('id="tiers-title"'));
+  assert.equal((approval.match(/<h3>/g) || []).length, 4);
+  assert.match(approval, /score what we see against our written standard/);
+  assert.match(approval, /our own standard, not a state license/);
+  // Then what each tier means, and why it works for the company placed in it.
+  const tiers = companies.slice(companies.indexOf('id="tiers-title"'), companies.indexOf('id="partner-form"'));
+  assert.ok(approval.length > 0 && tiers.length > 0);
   for (const tier of TIERS) {
     assert.ok(tiers.includes("<h3>" + tier + "</h3>"), tier);
   }
-  assert.equal((tiers.match(/You fit here if/g) || []).length, TIERS.length);
+  assert.equal((tiers.match(/We place you here when/g) || []).length, TIERS.length);
   assert.equal((tiers.match(/Why it works for you/g) || []).length, TIERS.length);
-  // The link above the tiers jumps to the application form further down the page.
+  // The link above them jumps to the application form further down the page.
   assert.ok(companies.includes('href="#partner-form"') && companies.includes('id="partner-form"'));
+  // Customers are told about the visit too.
+  const home = fs.readFileSync(path.join(site, "index.html"), "utf8");
+  assert.match(home.slice(home.indexOf('id="verified-title"')), /<span class="wear-cause">Site visit<\/span>/);
 });
 
 test("partner application and verification rules", async () => {
@@ -548,11 +577,260 @@ test("partner application and verification rules", async () => {
   const tooEarly = await site.form("/admin/partners/" + applied.id, { ...fields, check_registration: "on" }, { cookie: admin.cookie });
   assert.equal(tooEarly.status, 400);
   assert.match(await tooEarly.text(), /license, insurance, references/);
-  const verified = await site.form("/admin/partners/" + applied.id, {
-    ...fields, check_registration: "on", check_license: "on", check_insurance: "on", check_references: "on"
+  // Paperwork alone is not enough. Approval also needs a site visit that meets the standard.
+  const paperwork = { check_registration: "on", check_license: "on", check_insurance: "on", check_references: "on" };
+  const noVisit = await site.form("/admin/partners/" + applied.id, { ...fields, ...paperwork }, { cookie: admin.cookie });
+  assert.equal(noVisit.status, 400);
+  assert.match(await noVisit.text(), /Record a site visit that meets your standard/);
+  assert.equal((await pool.query("select status from partners where id = $1", [applied.id])).rows[0].status, "applied");
+  assert.equal((await site.form("/admin/partners/" + applied.id, { ...fields, ...paperwork, status: "applied" }, { cookie: admin.cookie })).status, 303);
+  const visit = await site.form("/admin/partners/" + applied.id + "/visit", {
+    csrf: admin.csrf, visit_on: todayInFlorida(), place: "Their shop", then: "save", ...(await everyItem())
   }, { cookie: admin.cookie });
+  assert.equal(visit.status, 303);
+  // With the visit on file, the company can be approved from its own form too.
+  const verified = await site.form("/admin/partners/" + applied.id, { ...fields, ...paperwork }, { cookie: admin.cookie });
   assert.equal(verified.status, 303);
-  assert.equal((await pool.query("select status from partners where id = $1", [applied.id])).rows[0].status, "verified");
+  const approved = (await pool.query("select * from partners where id = $1", [applied.id])).rows[0];
+  assert.equal(approved.status, "verified");
+  assert.equal(approved.approved_on, todayInFlorida());
+  assert.match(approved.review_due, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(approved.review_due > approved.approved_on);
+});
+
+test("certification: the standard, a site visit, approval into a tier, the approved list, and the certificate", async () => {
+  const { DEFAULT_STANDARD } = require("../server/lib/standard");
+  const site = await start();
+  const admin = await login(site);
+  const cookie = { cookie: admin.cookie };
+  const today = todayInFlorida();
+
+  // The standard starts from a draft the owner can change.
+  const page = await (await site.get("/admin/standard", cookie)).text();
+  for (const item of DEFAULT_STANDARD.items) assert.ok(page.includes(">" + item.label + "</textarea>"), item.label);
+  assert.match(page, /Your standard/);
+
+  // The owner writes their own: two must-meet items and three worth points.
+  const mine = {
+    csrf: admin.csrf,
+    label_0: "Site is safe and tidy", kind_0: "must",
+    label_1: "Written estimate for every job", kind_1: "must",
+    label_2: "Five years in business", kind_2: "2",
+    label_3: "Two-year warranty", kind_3: "2",
+    label_4: "Starts priority jobs within two weeks", kind_4: "1",
+    label_5: "", kind_5: "must",
+    review_months: "6"
+  };
+  const tooHigh = await site.form("/admin/standard", { ...mine, mid: "2", premium: "9" }, cookie);
+  assert.equal(tooHigh.status, 400);
+  const tooHighPage = await tooHigh.text();
+  assert.match(tooHighPage, /Premium needs 9 points, but the items only add up to 5/);
+  assert.ok(tooHighPage.includes(">Two-year warranty</textarea>"), "what the owner typed is kept");
+  assert.equal((await site.form("/admin/standard", { ...mine, mid: "4", premium: "2" }, cookie)).status, 400);
+  assert.equal((await site.form("/admin/standard", { ...mine, mid: "2", premium: "4", label_1: "site is SAFE and tidy" }, cookie)).status, 400);
+  assert.equal((await site.form("/admin/standard", { ...mine, csrf: "", mid: "2", premium: "4" }, cookie)).status, 403, "needs the form token");
+  assert.equal((await site.form("/admin/standard", { ...mine, mid: "2", premium: "4" }, {})).status, 303, "signed out: sent to the login page, nothing saved");
+  assert.equal((await pool.query("select count(*)::int as n from settings where key = 'standard'")).rows[0].n, 0);
+  const saved = await site.form("/admin/standard", { ...mine, mid: "2", premium: "4" }, cookie);
+  assert.equal(saved.status, 303);
+  assert.equal(saved.headers.get("location"), "/admin/standard?saved=1");
+  const savedPage = await (await site.get("/admin/standard?saved=1", cookie)).text();
+  assert.ok(savedPage.includes(">Site is safe and tidy</textarea>") && !savedPage.includes(DEFAULT_STANDARD.items[0].label));
+  assert.match(savedPage, /add up to 5 points/);
+
+  // A company applies. Two of its paperwork checks are done.
+  const details = {
+    csrf: admin.csrf, company: "Harbor <Fence> Co", contact_name: "Lee Owner", phone: "813-555-0155", email: "lee@example.test",
+    trade: "Fence", tier: "Premium", status: "applied"
+  };
+  const paperwork = { check_registration: "on", check_license: "on", check_insurance: "on", check_references: "on" };
+  const tooSoon = await site.form("/admin/partners", { ...details, ...paperwork, status: "verified" }, cookie);
+  assert.equal(tooSoon.status, 400, "a new company can't start as approved");
+  assert.match(await tooSoon.text(), /Add this company as Applied first/);
+  assert.equal((await site.form("/admin/partners", { ...details, check_registration: "on", check_license: "on" }, cookie)).status, 303);
+  const company = (await pool.query("select * from partners where company = 'Harbor <Fence> Co'")).rows[0];
+  const row = async () => (await pool.query("select * from partners where id = $1", [company.id])).rows[0];
+  const companyPath = "/admin/partners/" + company.id;
+  const visitPath = companyPath + "/visit";
+  const see = async (path) => (await site.get(path, cookie)).text();
+  const SAFE = "Site is safe and tidy";
+  const ESTIMATE = "Written estimate for every job";
+  const YEARS = "Five years in business";
+  const WARRANTY = "Two-year warranty";
+  const FAST = "Starts priority jobs within two weeks";
+  const visit = (fields) => site.form(visitPath, { csrf: admin.csrf, visit_on: today, ...fields }, cookie);
+  let list;
+  let companyPage = await see(companyPath);
+  assert.match(companyPage, /<h2>Site visit<\/h2>/);
+  assert.match(companyPage, /Written estimate for every job/);
+  assert.match(companyPage, /Two-year warranty <span class="optional">\(2 points\)<\/span>/);
+  assert.ok(companyPage.includes('name="' + itemKey(SAFE) + '">'), "boxes are named after the item, and start empty");
+  list = await see("/admin/partners");
+  assert.match(list, /Check their paperwork and visit a job/);
+  assert.match(list, /Fence<br>Applied as Premium</, "until the owner places them, a company's tier is the one it applied as");
+  assert.ok(list.includes('href="' + companyPath + '">Harbor'), "paperwork comes first, at the top of the company's page");
+  assert.ok(companyPage.includes('<a class="secondary" href="#visit">Go to the site visit</a>'));
+  assert.match(companyPage, /<label for="tier">Tier they applied as<\/label>/);
+
+  // A visit that misses a must-meet item can be saved, but not approved.
+  const missed = await visit({ place: "Job at <12> Oak St", then: "approve", ...tick(SAFE, YEARS) });
+  assert.equal(missed.status, 400);
+  const missedPage = await missed.text();
+  assert.match(missedPage, /The visit wasn’t saved\. It doesn’t meet every must-meet item/);
+  assert.ok(missedPage.includes('value="Job at &lt;12&gt; Oak St"'), "what the owner entered is kept, and escaped");
+  assert.ok(missedPage.includes('name="' + itemKey(SAFE) + '" checked') && missedPage.includes('name="' + itemKey(ESTIMATE) + '">'));
+  assert.equal((await row()).status, "applied");
+  assert.deepEqual((await row()).visit, {});
+  assert.equal((await visit({ visit_on: "2999-01-01", then: "save", ...tick(SAFE) })).status, 400, "no visits in the future");
+  assert.equal((await visit({ visit_on: "not a date", then: "save" })).status, 400);
+  assert.equal((await site.form(visitPath, { visit_on: today, then: "save" }, cookie)).status, 403, "needs the form token");
+  assert.equal((await visit({ place: "Job at <12> Oak St", visit_notes: "Estimate was <verbal>.", then: "save", ...tick(SAFE, YEARS) })).status, 303);
+  let now = await row();
+  assert.equal(now.status, "applied");
+  assert.equal(now.visit.passed, false);
+  assert.equal(now.visit.mustMet, 1);
+  assert.equal(now.visit.points, 2);
+  companyPage = await see(companyPath);
+  assert.match(companyPage, /Met 1 of 2 must-meet items\. Not met: Written estimate for every job\. They can&rsquo;t be approved/);
+  assert.ok(companyPage.includes("Job at &lt;12&gt; Oak St") && companyPage.includes("Estimate was &lt;verbal&gt;.") && !/<12>|<verbal>/.test(companyPage));
+  // Coming back to check what they fixed: the boxes start as they were left.
+  assert.match(companyPage, /The boxes start as you left them on /);
+  assert.ok(companyPage.includes('name="' + itemKey(SAFE) + '" checked') && companyPage.includes('name="' + itemKey(ESTIMATE) + '">'));
+  list = await see("/admin/partners");
+  assert.match(list, /<h2>Working toward approval<\/h2>[\s\S]*Harbor &lt;Fence&gt; Co/);
+  assert.match(list, /Visit again when they’ve fixed what was missed/);
+  assert.ok(list.includes('href="' + companyPath + '#visit">Harbor'), "the row opens the company's page at the site visit");
+  assert.equal((await site.get(companyPath + "/certificate", cookie)).status, 404, "no certificate before approval");
+
+  // The visit meets the standard, but the paperwork isn't finished. The visit is kept, and the page says what's left.
+  const early = await visit({ place: "Job at 12 Oak St", visit_notes: "Clean site.", then: "approve", ...tick(SAFE, ESTIMATE, YEARS, FAST) });
+  assert.equal(early.status, 303);
+  assert.equal(early.headers.get("location"), companyPath + "#visit");
+  now = await row();
+  assert.equal(now.status, "applied", "not approved without the paperwork");
+  assert.equal(now.visit.passed, true);
+  assert.equal(now.visit.points, 3);
+  assert.equal(now.visit.tier, "Mid-range", "3 points: at least the 2 for mid-range, short of the 4 for premium");
+  assert.equal(now.tier, "Premium", "still the tier they asked for");
+  companyPage = await see(companyPath);
+  assert.match(companyPage, /Scored 3 of 5 tier points, which suggests Mid-range\./);
+  assert.match(companyPage, /Points for: Five years in business; Starts priority jobs within two weeks\./);
+  assert.match(companyPage, /tick these paperwork checks above and save: insurance, references\./);
+  assert.ok(!companyPage.includes("/approve"), "no approve button until the paperwork is done");
+  assert.ok(!companyPage.includes(" checked> <span>" + SAFE), "a new scorecard starts empty after a visit that passed");
+  assert.match(await see("/admin/partners"), /Finish their paperwork checks/);
+  const blocked = await site.form(companyPath + "/approve", { csrf: admin.csrf }, cookie);
+  assert.equal(blocked.status, 400);
+  assert.match(await blocked.text(), /Tick these checks before approving this company: insurance, references\./);
+
+  // With the paperwork ticked, one button approves the company into the tier its points suggest.
+  const lastCheck = await site.form(companyPath, { ...details, ...paperwork }, cookie);
+  assert.equal(lastCheck.status, 303);
+  assert.equal(lastCheck.headers.get("location"), companyPath + "#visit", "straight to the approve button");
+  assert.match(await see("/admin/partners"), /Ready to approve/);
+  companyPage = await see(companyPath);
+  assert.match(companyPage, new RegExp('action="' + companyPath + '/approve"[\\s\\S]*?<button class="primary" type="submit">Approve as Mid-range</button>'));
+  assert.match(companyPage, /their paperwork is checked\. They applied as Premium\./);
+  assert.equal((await site.form(companyPath + "/approve", {}, cookie)).status, 403, "needs the form token");
+  const approvedNow = await site.form(companyPath + "/approve", { csrf: admin.csrf }, cookie);
+  assert.equal(approvedNow.status, 303);
+  now = await row();
+  assert.equal(now.status, "verified");
+  assert.equal(now.tier, "Mid-range");
+  assert.equal(now.approved_on, today);
+  companyPage = await see(companyPath);
+  assert.match(companyPage, /<label for="tier">Tier<\/label>/);
+  assert.match(companyPage, new RegExp('<a class="secondary" href="' + companyPath + '/certificate">Open the certificate</a>'));
+  assert.match(await see("/admin/partners"), /Fence<br>Mid-range</);
+  const monthsOut = (months) => new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + months, 1)).toISOString().slice(0, 7);
+  assert.equal(now.review_due.slice(0, 7), monthsOut(6), "the next visit is six months out, as the standard says");
+
+  // A later visit that meets the standard renews the approval: the first date stays, and the owner's tier choice wins.
+  await pool.query("update partners set approved_on = '2026-01-15', review_due = '2026-07-15' where id = $1", [company.id]);
+  assert.match(await see("/admin/partners"), /Another visit is due/);
+  assert.match(await see(companyPath + "/certificate"), /This certificate&rsquo;s date has passed/);
+  companyPage = await see(companyPath);
+  assert.match(companyPage, /renews their approval for 6 months/);
+  assert.ok(!companyPage.includes("Save the visit and approve"));
+  assert.equal((await visit({ then: "save", visit_tier: "Premium", ...tick(SAFE, ESTIMATE) })).status, 303);
+  now = await row();
+  assert.equal(now.tier, "Premium");
+  assert.equal(now.approved_on, "2026-01-15");
+  assert.equal(now.review_due.slice(0, 7), monthsOut(6));
+  assert.match(await see(companyPath), /Scored 0 of 5 tier points, which suggests Affordable\. They are in Premium\./);
+
+  // The approved list, on the page and as an Excel file.
+  const number = "AV-" + (1000 + company.id);
+  list = await see("/admin/partners");
+  const approvedPart = list.slice(list.indexOf("<h2>Approved vendors</h2>"), list.indexOf("<h2>Your own crew</h2>"));
+  assert.ok(approvedPart.includes("Harbor &lt;Fence&gt; Co") && approvedPart.includes(number + ", approved Jan 15, 2026<br>Visit again by "));
+  assert.match(approvedPart, /<a href="tel:8135550155">813-555-0155<\/a>/, "an approved vendor is still one tap to call");
+  assert.ok(!approvedPart.includes("AT Legacy Services"), "the owner's own crew is not a vendor");
+  assert.doesNotMatch(approvedPart, /needs-you/);
+  assert.match(list, /href="\/admin\/approved\.xlsx">Download the approved list for Excel/);
+  const sheet = await site.get("/admin/approved.xlsx", cookie);
+  assert.equal(sheet.status, 200);
+  assert.match(sheet.headers.get("content-disposition"), /attachment; filename="AT-Legacy-approved-vendors-\d{4}-\d{2}-\d{2}\.xlsx"/);
+  const files = unzip(Buffer.from(await sheet.arrayBuffer()));
+  const rows = files["xl/worksheets/sheet1.xml"];
+  assert.ok(rows.includes(">" + number + "<") && rows.includes(">Harbor &lt;Fence&gt; Co<") && rows.includes(">Premium<"));
+  assert.ok(!Object.values(files).some((xml) => /<f[ >]/.test(xml)), "no formulas");
+  assert.equal((await site.get("/admin/approved.xlsx")).status, 303, "signed out: sent to the login page");
+
+  // The certificate.
+  const certificate = await site.get(companyPath + "/certificate", cookie);
+  assert.equal(certificate.status, 200);
+  const certificateText = await certificate.text();
+  assert.ok(certificateText.includes("Harbor &lt;Fence&gt; Co") && certificateText.includes(number) && certificateText.includes("Jan 15, 2026"));
+  assert.match(certificateText, /It is not a state license/);
+  assert.doesNotMatch(certificateText, /date has passed/);
+  assert.ok(certificateText.includes('href="' + companyPath + '#visit">Back to the company</a>'));
+  assert.equal((await site.get(companyPath + "/certificate")).status, 303);
+
+  // An approved company that misses a must-meet item at a later visit stays approved until the owner pauses it.
+  assert.equal((await visit({ then: "save", ...tick(SAFE) })).status, 303);
+  now = await row();
+  assert.equal(now.status, "verified");
+  assert.equal(now.visit.passed, false);
+  assert.match(await see(companyPath), /Not met: Written estimate for every job\. They stay approved until you pause them\./);
+  assert.match(await see("/admin/partners"), /The last visit missed a must-meet item/);
+  // Its details can still be corrected, and pausing takes it off the approved list without losing its dates.
+  assert.equal((await site.form(companyPath, { ...details, ...paperwork, phone: "813-555-0156", status: "verified" }, cookie)).status, 303);
+  assert.equal((await site.form(companyPath, { ...details, ...paperwork, status: "paused" }, cookie)).status, 303);
+  now = await row();
+  assert.equal(now.approved_on, "2026-01-15");
+  list = await see("/admin/partners");
+  assert.ok(!list.slice(list.indexOf("<h2>Approved vendors</h2>"), list.indexOf("<h2>Paused</h2>")).includes("Harbor"));
+  assert.equal((await site.get(companyPath + "/certificate", cookie)).status, 404);
+  // It can't come back while its last visit is a miss.
+  const back = await site.form(companyPath, { ...details, ...paperwork, status: "verified" }, cookie);
+  assert.equal(back.status, 400);
+  assert.match(await back.text(), /Record a site visit that meets your standard/);
+  // Moving it back to Applied withdraws the certification.
+  assert.equal((await site.form(companyPath, { ...details, ...paperwork }, cookie)).status, 303);
+  now = await row();
+  assert.equal(now.approved_on, "");
+  assert.equal(now.review_due, "");
+
+  // A scorecard opened before the standard changed can't tick the wrong item: boxes go by wording, not position.
+  assert.equal((await site.form("/admin/standard", { csrf: admin.csrf, label_0: ESTIMATE, kind_0: "must", label_1: WARRANTY, kind_1: "3", mid: "1", premium: "3", review_months: "12" }, cookie)).status, 303);
+  assert.equal((await visit({ then: "approve", met_0: "on", met_1: "on", ...tick(SAFE, WARRANTY) })).status, 400, "the must-meet item wasn't ticked");
+  assert.equal((await visit({ then: "approve", ...tick(SAFE, ESTIMATE, WARRANTY) })).status, 303);
+  now = await row();
+  assert.equal(now.status, "verified");
+  assert.equal(now.visit.points, 3);
+  assert.equal(now.tier, "Premium");
+  assert.equal(now.approved_on, today);
+  assert.deepEqual(now.visit.items.map((item) => item.label), [ESTIMATE, WARRANTY], "a visit keeps the wording it was scored against");
+
+  // The owner's own crew is not scored.
+  const crew = (await pool.query("select id from partners where trade = 'Home repairs and upkeep'")).rows[0];
+  assert.ok(!(await see("/admin/partners/" + crew.id)).includes("<h2>Site visit</h2>"));
+  assert.equal((await site.form("/admin/partners/" + crew.id + "/visit", { csrf: admin.csrf, visit_on: today, then: "save" }, cookie)).status, 404);
+  assert.equal((await site.form("/admin/partners/" + crew.id + "/approve", { csrf: admin.csrf }, cookie)).status, 404);
+
+  // Put the starting standard back for the tests that follow.
+  await pool.query("delete from settings where key = 'standard'");
 });
 
 test("full flow: request, invites, quotes, choice, and fee", async () => {
@@ -686,18 +964,26 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   assert.equal((await site.json("/api/partners", application)).status, 201);
   const partner = (await pool.query("select * from partners where trade = 'Fence'")).rows[0];
   let home = await see("/admin");
-  assert.match(home, /<a href="\/admin\/partners">1 partner application to review<\/a>/);
+  assert.match(home, /<a href="\/admin\/partners">1 company needs a check or a visit<\/a>/);
   let partnersPage = await see("/admin/partners");
   assert.match(partnersPage, /class="owner-row needs-you"/);
-  assert.match(partnersPage, /Review their application/);
+  assert.match(partnersPage, /Check their paperwork and visit a job/);
   assert.match(partnersPage, /<a href="tel:8135550199">813-555-0199&quot;&gt;&lt;script&gt;<\/a>/);
   assert.doesNotMatch(partnersPage, /<script>|<i>Fence/);
-  const verify = await site.form("/admin/partners/" + partner.id, {
+  const paperwork = await site.form("/admin/partners/" + partner.id, {
     csrf: admin.csrf, company: partner.company, contact_name: partner.contact_name, phone: partner.phone, email: partner.email,
-    trade: "Fence", tier: "Affordable", status: "verified",
+    trade: "Fence", tier: "Affordable", status: "applied",
     check_registration: "on", check_license: "on", check_insurance: "on", check_references: "on"
   }, { cookie: admin.cookie });
+  assert.equal(paperwork.status, 303);
+  const verify = await site.form("/admin/partners/" + partner.id + "/visit", {
+    csrf: admin.csrf, visit_on: todayInFlorida(), place: "A job in Lutz", visit_tier: "Affordable", then: "approve", ...(await everyItem())
+  }, { cookie: admin.cookie });
   assert.equal(verify.status, 303);
+  partnersPage = await see("/admin/partners");
+  assert.match(partnersPage, /<h2>Approved vendors<\/h2>/);
+  assert.match(partnersPage, new RegExp("AV-" + (1000 + partner.id) + ", approved "));
+  assert.doesNotMatch(partnersPage, /class="owner-row needs-you"/);
 
   const { url, row } = await createRequest(site, { name: 'Dana <b>Customer</b>', phone: "(813) 555-0100 <x>", email: "dana+quotes@example.test", contact: "Email" });
   for (const path of ["/", "/quote", "/partners", url]) {

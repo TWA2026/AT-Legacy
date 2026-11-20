@@ -1,9 +1,13 @@
 const express = require("express");
-const { esc, page, ownerPage, briefHtml, formatDate, formatDateTime } = require("../lib/html");
+const { esc, page, ownerPage, certificatePage, briefHtml, formatDate, formatDateTime, formatDay } = require("../lib/html");
 const { SEND_EVENTS, requestRef, customerPath, companyPath, loadActivity } = require("../lib/links");
 const { workbook } = require("../lib/xlsx");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
+const {
+  MAX_LABEL, MAX_POINTS, loadStandard, saveStandard, standardFromForm, possiblePoints, itemKey, metFromForm, scoreVisit,
+  certificateNo, isDay, today, addMonths
+} = require("../lib/standard");
 const {
   newToken, safeEqual, createSession, readSession, csrfToken, sessionCookie, rateLimiter,
   createLoginState, checkLoginState, stateCookie
@@ -13,7 +17,7 @@ const { createEdgeGuard, MARKER_HEADER, MARKER } = require("../lib/edge");
 
 const STATUS_LABELS = {
   new: "New", collecting: "Collecting quotes", chosen: "Company chosen", closed: "Closed",
-  applied: "Applied", verified: "Verified", paused: "Paused",
+  applied: "Applied", verified: "Approved", paused: "Paused",
   invited: "Waiting for quote", visit: "Site visit needed", submitted: "Quote in", declined: "Passed"
 };
 
@@ -307,7 +311,9 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
            from quotes q join partners p on p.id = q.partner_id
           where q.request_id = any($1::int[])`, [requests.map((r) => r.id)]
       )).rows : [];
-      const applied = Number((await pool.query("select count(*) from partners where status = 'applied'")).rows[0].count);
+      // Companies waiting on the owner: paperwork to check, a site visit to make, or an approval to give.
+      const now = today();
+      const waiting = (await pool.query("select * from partners where status in ('applied', 'verified')")).rows.filter((p) => vendorStep(p, now).label).length;
       const owed = Number((await pool.query(
         `select coalesce(sum(round(coalesce(q.final_amount_cents, q.amount_cents) * q.fee_percent / 100.0)), 0) as cents
            from requests r join quotes q on q.id = r.chosen_quote_id
@@ -324,7 +330,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       const todo = [];
       const needy = items.filter((item) => item.step.needsYou);
       if (needy.length) todo.push(`<li><a href="/admin/requests/${needy[0].r.id}">${plural(needy.length, "request needs", "requests need")} companies</a></li>`);
-      if (applied) todo.push(`<li><a href="/admin/partners">${plural(applied, "partner application", "partner applications")} to review</a></li>`);
+      if (waiting) todo.push(`<li><a href="/admin/partners">${plural(waiting, "company needs", "companies need")} a check or a visit</a></li>`);
       if (owed > 0) todo.push(`<li><a href="/admin/fees">${esc(formatDollars(owed))} in finder’s fees to collect</a></li>`);
 
       const rows = items.map(({ r, quotes, step }) => `<li class="owner-row${step.needsYou ? " needs-you" : ""}">
@@ -532,36 +538,55 @@ ${tiers}
     }
   });
 
-  // Partners
+  // Partners: the approved vendor list, then the companies working toward it.
+  // "Approved" is the status the database calls verified. A company gets there by passing its
+  // paperwork checks and a site visit scored against the owner's standard (server/lib/standard.js).
   router.get("/partners", async (req, res, next) => {
     try {
-      const partners = (await pool.query("select * from partners order by (status = 'applied') desc, (status = 'paused'), company")).rows;
-      const rows = partners.map((p) => {
+      const partners = (await pool.query("select * from partners order by company")).rows;
+      const now = today();
+      const row = (p) => {
         const callTo = dial(p.phone);
-        return `<li class="owner-row${p.status === "applied" ? " needs-you" : ""}">
-          <a class="owner-row-main" href="/admin/partners/${p.id}">${esc(p.company)}</a>
-          <p class="owner-row-facts">${esc(p.trade)}<br>${esc(p.tier)}</p>
+        const ownCrew = p.trade === OWN_CREW_SERVICE;
+        const approved = p.status === "verified";
+        const step = vendorStep(p, now);
+        const next = step.label;
+        // An approved vendor's certificate number and dates sit under its service and tier.
+        const certificate = approved && !ownCrew && p.approved_on
+          ? `<br>${esc(certificateNo(p.id))}, approved ${esc(formatDay(p.approved_on))}${p.review_due ? "<br>Visit again by " + esc(formatDay(p.review_due)) : ""}`
+          : "";
+        return `<li class="owner-row${next ? " needs-you" : ""}">
+          <a class="owner-row-main" href="/admin/partners/${p.id}${step.atVisit ? "#visit" : ""}">${esc(p.company)}</a>
+          <p class="owner-row-facts">${esc(p.trade)}<br>${placed(p) ? "" : "Applied as "}${esc(p.tier)}${certificate}</p>
           <p class="owner-row-facts">${esc(p.contact_name)}${callTo ? `<br><a href="tel:${esc(callTo)}">${esc(p.phone)}</a>` : (p.phone ? "<br>" + esc(p.phone) : "")}</p>
           <p class="owner-row-state">${pill(p.status)}</p>
-          ${p.status === "applied" ? '<p class="owner-row-next">Review their application</p>' : ""}
+          ${next ? `<p class="owner-row-next">${esc(next)}</p>` : ""}
         </li>`;
-      }).join("\n");
+      };
+      const group = (title, list, empty = "") => (list.length || empty ? `    <section class="app-section partner-group">
+      <h2>${title}</h2>
+      ${list.length ? `<ul class="owner-list">
+${list.map(row).join("\n")}
+      </ul>` : `<p class="owner-empty">${empty}</p>`}
+    </section>` : "");
+      const vendors = partners.filter((p) => p.trade !== OWN_CREW_SERVICE);
       res.send(adminPage(req, {
         current: "partners",
         title: "Partners",
         heading: "Partners",
-        intro: "The companies you send jobs to. Only a verified partner can be sent a job brief.",
-        body: `    <p class="owner-actions"><a class="primary" href="/admin/partners/new">Add a partner</a></p>
-    <ul class="owner-list">
-${rows}
-    </ul>
+        intro: "Your approved vendor list, and the companies working toward it. Only an approved company can be sent a job brief.",
+        body: `    <p class="owner-actions owner-sheet-links"><a class="primary" href="/admin/partners/new">Add a partner</a> <a class="secondary" href="/admin/standard">Your standard</a> <a class="secondary" href="/admin/approved.xlsx">Download the approved list for Excel</a></p>
+${group("Approved vendors", vendors.filter((p) => p.status === "verified"), "No approved vendors yet. A company is approved after its paperwork checks and a site visit that meets your standard.")}
+${group("Working toward approval", vendors.filter((p) => p.status === "applied"))}
+${group("Paused", vendors.filter((p) => p.status === "paused"))}
+${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
     <section class="app-section owner-after">
       <h2>Bring on a company</h2>
       ${linkRow({
         id: "signup-link", readable: true,
         label: "Company sign-up page",
         link: siteUrl(req) + "/partners",
-        note: "Send this to a company you want as a partner. Their application shows up in the list above as Applied.",
+        note: "Send this to a company you want as a partner. Their application shows up above, under Working toward approval.",
         message: "AT Legacy Services sends local homeowners’ jobs to companies like yours. No lead fees. Apply here:",
         open: "Open the sign-up page"
       })}
@@ -593,7 +618,7 @@ ${rows}
           ${input("phone", "Phone", { max: 30 })}
           ${input("email", "Email", { max: 100 })}
           <div class="field"><label for="trade">Service</label><select id="trade" name="trade" required>${options(SERVICE_NAMES, p.trade)}</select></div>
-          <div class="field"><label for="tier">Tier</label><select id="tier" name="tier" required>${options(TIERS.concat(OWN_CREW_TIER), p.tier)}</select></div>
+          <div class="field"><label for="tier">${placed(p) ? "Tier" : "Tier they applied as"}</label><select id="tier" name="tier" required>${options(TIERS.concat(OWN_CREW_TIER), p.tier)}</select></div>
           ${input("years", "Years in business", { max: 3 })}
           ${input("license_no", "State license number", { max: 40 })}
           ${input("areas", "Areas served")}
@@ -601,7 +626,7 @@ ${rows}
         </div>
       </section>
       <fieldset class="form-part tier-part">
-        <legend>Verification</legend>
+        <legend>Paperwork checks</legend>
         ${p.insured ? `<p class="form-note">On their application: liability insurance &ldquo;${esc(p.insured)}&rdquo;.</p>` : ""}
         <div class="choices">
           ${check("check_registration", "Active Florida business registration confirmed")}
@@ -612,7 +637,7 @@ ${rows}
         <div class="field"><label for="status">Status</label><select id="status" name="status">
           ${["applied", "verified", "paused"].map((s) => `<option value="${s}"${p.status === s ? " selected" : ""}>${STATUS_LABELS[s]}</option>`).join("")}
         </select></div>
-        ${ownCrew ? "" : '<p class="form-note">A partner can be marked verified only after every check that applies is ticked.</p>'}
+        ${ownCrew ? "" : '<p class="form-note">A company can be approved only after every check that applies is ticked and a site visit meets your standard.</p>'}
         <div class="field wide"><label for="notes">Notes <span class="optional">(only you see these)</span></label><textarea id="notes" name="notes" rows="3" maxlength="1000">${esc(p.notes || "")}</textarea></div>
       </fieldset>
       <button class="primary" type="submit">Save partner</button>
@@ -633,17 +658,157 @@ ${rows}
     };
   }
 
-  function partnerProblem(p) {
+  // The paperwork checks a company still needs. The license check applies only to trades that need one.
+  function missingPaperwork(p) {
+    const missing = [];
+    if (!p.check_registration) missing.push("business registration");
+    if (licenseCheck(p.trade) && !p.check_license) missing.push("license");
+    if (!p.check_insurance) missing.push("insurance");
+    if (!p.check_references) missing.push("references");
+    return missing;
+  }
+
+  const lastVisit = (p) => (p.visit && p.visit.on ? p.visit : null);
+
+  // True once the owner has given a company its tier. Until then, its tier is the one it applied as.
+  const placed = (p) => p.trade === OWN_CREW_SERVICE || p.status === "verified" || Boolean(p.approved_on);
+
+  // What stops a company from being saved. A company can be approved only after its paperwork checks
+  // and a site visit that meets the standard. `becoming` is true when this save would approve it.
+  function partnerProblem(p, becoming = true) {
     if (!p.company || !p.contact_name) return "Company name and contact name are required.";
     if (p.status === "verified" && p.trade !== OWN_CREW_SERVICE) {
-      const missing = [];
-      if (!p.check_registration) missing.push("business registration");
-      if (licenseCheck(p.trade) && !p.check_license) missing.push("license");
-      if (!p.check_insurance) missing.push("insurance");
-      if (!p.check_references) missing.push("references");
-      if (missing.length) return "Tick these checks before marking this partner verified: " + missing.join(", ") + ".";
+      const missing = missingPaperwork(p);
+      if (missing.length) return "Tick these checks before approving this company: " + missing.join(", ") + ".";
+      if (becoming && !(lastVisit(p) && p.visit.passed)) return "Record a site visit that meets your standard before approving this company.";
     }
     return "";
+  }
+
+  // What a company on the Partners page needs from the owner next, if anything.
+  // `atVisit` is true when that step happens in the site visit part of the company's page.
+  function vendorStep(p, now) {
+    const paperwork = (label) => ({ label, atVisit: false });
+    const atVisit = (label) => ({ label, atVisit: true });
+    if (p.trade === OWN_CREW_SERVICE) return paperwork("");
+    const visit = lastVisit(p);
+    if (p.status === "applied") {
+      if (!visit) return missingPaperwork(p).length ? paperwork("Check their paperwork and visit a job") : atVisit("Visit a job site or their shop");
+      if (!visit.passed) return atVisit("Visit again when they’ve fixed what was missed");
+      return missingPaperwork(p).length ? paperwork("Finish their paperwork checks") : atVisit("Ready to approve");
+    }
+    if (p.status === "verified") {
+      if (!p.approved_on) return atVisit("Record a site visit");
+      if (visit && !visit.passed) return atVisit("The last visit missed a must-meet item");
+      if (p.review_due && p.review_due <= now) return atVisit("Another visit is due");
+    }
+    return paperwork("");
+  }
+
+  // The site visit: the owner scores the company against the standard. A visit that meets it lets the
+  // company be approved into a tier, and renews a company that is already approved.
+  function visitSection(p, standard, { shown = null, error = "" } = {}) {
+    const last = lastVisit(p);
+    const approved = p.status === "verified";
+    // A scorecard starts empty, except when the owner comes back to check what a company fixed.
+    const fill = shown || (last && !last.passed ? last : null);
+    const wasMet = new Set(((fill && fill.items) || []).filter((item) => item.met).map((item) => item.label));
+    const box = (item) => `<label class="choice"><input type="checkbox" name="${itemKey(item.label)}"${wasMet.has(item.label) ? " checked" : ""}> <span>${esc(item.label)}${item.kind === "points" ? ` <span class="optional">(${plural(item.points, "point", "points")})</span>` : ""}</span></label>`;
+    const boxes = (kind) => standard.items.filter((item) => item.kind === kind).map(box).join("\n          ");
+
+    let result = "";
+    let next = "";
+    if (last) {
+      const items = last.items || [];
+      const missed = items.filter((item) => item.kind === "must" && !item.met).map((item) => item.label);
+      const earned = items.filter((item) => item.kind === "points" && item.met).map((item) => item.label);
+      const give = last.give || last.tier;
+      let outcome;
+      if (!last.passed) {
+        outcome = `Not met: ${esc(missed.join("; "))}. ${approved ? "They stay approved until you pause them." : "They can&rsquo;t be approved until every must-meet item is met."}`;
+      } else {
+        outcome = `Scored ${esc(last.points)} of ${plural(last.possible, "tier point", "tier points")}, which suggests ${esc(last.tier)}.`;
+        if (approved && p.tier !== last.tier) outcome += ` They are in ${esc(p.tier)}.`;
+        else if (!approved && give !== last.tier) outcome += ` You chose ${esc(give)}.`;
+      }
+      result = `<div class="visit-result${last.passed ? "" : " visit-missed"}">
+        <p><strong>Last visit: ${esc(formatDay(last.on))}${last.place ? ", " + esc(last.place) : ""}</strong></p>
+        <p>Met ${esc(last.mustMet)} of ${plural(last.mustTotal, "must-meet item", "must-meet items")}. ${outcome}</p>
+        ${last.passed && earned.length ? `<p>Points for: ${esc(earned.join("; "))}.</p>` : ""}
+        ${last.notes ? `<p>Your notes: ${esc(last.notes)}</p>` : ""}
+      </div>`;
+      if (approved && p.approved_on) {
+        next = `<p class="form-note">Certificate ${esc(certificateNo(p.id))}. Approved ${esc(formatDay(p.approved_on))}${p.review_due ? ". Visit again by " + esc(formatDay(p.review_due)) : ""}.</p>
+      <p class="owner-actions"><a class="secondary" href="/admin/partners/${p.id}/certificate">Open the certificate</a></p>`;
+      } else if (!approved && last.passed) {
+        const missing = missingPaperwork(p);
+        next = missing.length
+          ? `<p class="form-note">This visit meets your standard. Before you can approve them, tick these paperwork checks above and save: ${esc(missing.join(", "))}.</p>`
+          : `<form class="visit-approve" method="post" action="/admin/partners/${p.id}/approve">
+        ${csrfField}
+        <p class="form-note">This visit meets your standard, and their paperwork is checked.${p.tier !== give ? ` They applied as ${esc(p.tier)}.` : ""}</p>
+        <button class="primary" type="submit">Approve as ${esc(give)}</button>
+      </form>`;
+      }
+    }
+    return `
+    <section class="app-section owner-after" id="visit">
+      <h2>Site visit</h2>
+      <p class="form-note">Score what you see against <a class="plain-link" href="/admin/standard">your standard</a>. A company has to meet every must-meet item to be approved. The points suggest its tier.</p>
+      ${result}
+      ${next}
+      <form class="quote-form visit-form${last ? "" : " visit-first"}" method="post" action="/admin/partners/${p.id}/visit">
+        ${csrfField}
+        <div class="visit-head">
+          <h3>${last ? "Record another visit" : "Record a visit"}</h3>
+          ${error ? `<p class="form-error">${esc(error)}</p>` : ""}
+          ${!shown && fill ? `<p class="form-note">The boxes start as you left them on ${esc(formatDay(fill.on))}.</p>` : ""}
+        </div>
+        <div class="fields">
+          <div class="field"><label for="visit_on">Date of the visit</label><input id="visit_on" name="visit_on" type="date" value="${esc(shown && shown.on ? shown.on : today())}" max="${today()}" required></div>
+          <div class="field"><label for="place">What you visited <span class="optional">(a job site or their shop)</span></label><input id="place" name="place" type="text" maxlength="120" value="${esc(shown ? shown.place || "" : "")}"></div>
+        </div>
+        <fieldset class="form-part tier-part">
+          <legend>Must meet</legend>
+          <div class="choices">
+          ${boxes("must") || '<p class="form-note">Your standard has no must-meet items.</p>'}
+          </div>
+        </fieldset>
+        <fieldset class="form-part tier-part">
+          <legend>Tier points</legend>
+          <p class="form-note">${plural(standard.mid, "point", "points")} or more suggests Mid-range. ${plural(standard.premium, "point", "points")} or more suggests Premium.</p>
+          <div class="choices">
+          ${boxes("points") || '<p class="form-note">Your standard has no items worth points.</p>'}
+          </div>
+        </fieldset>
+        <div class="fields">
+          <div class="field"><label for="visit_tier">Tier to give them${placed(p) ? "" : ` <span class="optional">(they applied as ${esc(p.tier)})</span>`}</label><select id="visit_tier" name="visit_tier"><option value="">The tier the points suggest</option>${options(TIERS, shown ? shown.give || "" : "")}</select></div>
+          <div class="field wide"><label for="visit_notes">Notes from the visit <span class="optional">(only you see these)</span></label><textarea id="visit_notes" name="visit_notes" rows="3" maxlength="1000">${esc(shown ? shown.notes || "" : "")}</textarea></div>
+        </div>
+        ${approved
+          ? `<p class="form-note">A visit that meets your standard renews their approval for ${plural(standard.reviewMonths, "month", "months")} and sets their tier.</p>
+        <button class="primary" type="submit" name="then" value="save">Save the visit</button>`
+          : `<div class="done-actions">
+          <button class="primary" type="submit" name="then" value="approve">Save the visit and approve</button>
+          <button class="secondary" type="submit" name="then" value="save">Save the visit only</button>
+        </div>`}
+      </form>
+    </section>`;
+  }
+
+  // One company's page: its details and paperwork, then its site visits.
+  // `error` belongs to the details form. `visitError` belongs to the scorecard, further down the page.
+  async function partnerPage(req, p, { error = "", form = null, shown = null, visitError = "" } = {}) {
+    const ownCrew = p.trade === OWN_CREW_SERVICE;
+    const standard = ownCrew ? null : await loadStandard(pool);
+    const alert = visitError ? `    <p class="form-error page-alert" role="alert">${esc(visitError)} <a href="#visit">Go to the site visit</a></p>\n`
+      : (ownCrew ? "" : `    <p class="owner-actions"><a class="secondary" href="#visit">Go to the site visit</a></p>\n`);
+    return adminPage(req, {
+      ...PARTNER_PAGE, title: p.company, heading: p.company,
+      intro: "Added " + formatDate(p.created_at) + ". " + STATUS_LABELS[p.status] + ".",
+      body: alert + partnerForm(form ? { ...p, ...form } : p, "/admin/partners/" + p.id, error)
+        + (ownCrew ? "" : visitSection(p, standard, { shown, error: visitError }))
+    });
   }
 
   router.get("/partners/new", (req, res) => {
@@ -653,7 +818,10 @@ ${rows}
   router.post("/partners", async (req, res, next) => {
     try {
       const p = readPartner(req.body);
-      const problem = partnerProblem(p);
+      // A new company has no site visit yet, so it can't start as Approved. The owner's own crew can.
+      const tooSoon = p.status === "verified" && p.trade !== OWN_CREW_SERVICE;
+      const problem = partnerProblem({ ...p, status: tooSoon ? "applied" : p.status })
+        || (tooSoon ? "Add this company as Applied first. You can approve it after a site visit that meets your standard." : "");
       if (problem) return res.status(400).send(adminPage(req, { ...PARTNER_PAGE, title: "Add a partner", heading: "Add a partner", body: partnerForm(p, "/admin/partners", problem) }));
       await pool.query(
         `insert into partners (company, contact_name, phone, email, trade, tier, years, license_no, areas, website, status,
@@ -672,7 +840,7 @@ ${rows}
     try {
       const p = (await pool.query("select * from partners where id = $1", [Number(req.params.id) || 0])).rows[0];
       if (!p) return next();
-      res.send(adminPage(req, { ...PARTNER_PAGE, title: p.company, heading: p.company, intro: "Added " + formatDate(p.created_at) + ". " + STATUS_LABELS[p.status] + ".", body: partnerForm(p, "/admin/partners/" + p.id) }));
+      res.send(await partnerPage(req, p));
     } catch (error) {
       next(error);
     }
@@ -684,19 +852,213 @@ ${rows}
       const existing = (await pool.query("select * from partners where id = $1", [id])).rows[0];
       if (!existing) return next();
       const p = readPartner(req.body);
-      const problem = partnerProblem(p);
-      if (problem) {
-        return res.status(400).send(adminPage(req, { ...PARTNER_PAGE, title: existing.company, heading: existing.company, body: partnerForm({ ...existing, ...p }, "/admin/partners/" + id, problem) }));
+      const problem = partnerProblem({ ...p, visit: existing.visit }, existing.status !== "verified");
+      if (problem) return res.status(400).send(await partnerPage(req, existing, { error: problem, form: p }));
+      // The dates of the certification. Pausing keeps them. Moving a company back to Applied withdraws it.
+      let approvedOn = existing.approved_on;
+      let reviewDue = existing.review_due;
+      if (p.status === "applied") {
+        approvedOn = "";
+        reviewDue = "";
+      } else if (p.status === "verified" && p.trade !== OWN_CREW_SERVICE && !approvedOn && lastVisit(existing)) {
+        approvedOn = existing.visit.on;
+        reviewDue = addMonths(existing.visit.on, (await loadStandard(pool)).reviewMonths);
       }
       await pool.query(
         `update partners set company = $1, contact_name = $2, phone = $3, email = $4, trade = $5, tier = $6, years = $7,
                 license_no = $8, areas = $9, website = $10, status = $11, check_registration = $12, check_license = $13,
-                check_insurance = $14, check_references = $15, notes = $16
-          where id = $17`,
+                check_insurance = $14, check_references = $15, notes = $16, approved_on = $17, review_due = $18
+          where id = $19`,
         [p.company, p.contact_name, p.phone, p.email, p.trade, p.tier, p.years, p.license_no, p.areas, p.website, p.status,
-          p.check_registration, p.check_license, p.check_insurance, p.check_references, p.notes, id]
+          p.check_registration, p.check_license, p.check_insurance, p.check_references, p.notes, approvedOn, reviewDue, id]
       );
-      res.redirect(303, "/admin/partners");
+      // When this save was the last thing standing between the company and approval, go straight to the approve button.
+      const ready = vendorStep({ ...existing, ...p }, today()).label === "Ready to approve";
+      res.redirect(303, ready ? "/admin/partners/" + id + "#visit" : "/admin/partners");
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Puts a company on the approved list, in a tier, on the strength of the visit passed in.
+  // A first approval is dated by that visit. A renewal keeps the first date and moves the next visit out.
+  async function approveFrom(p, visit, standard) {
+    await pool.query(
+      `update partners set visit = $1, status = 'verified', tier = $2, review_due = $3,
+              approved_on = case when approved_on <> '' then approved_on else $4 end
+        where id = $5`,
+      [JSON.stringify(visit), visit.give || visit.tier, addMonths(visit.on, standard.reviewMonths), visit.on, p.id]
+    );
+  }
+
+  // Record a site visit. A visit that meets the standard can approve the company, or renew it.
+  router.post("/partners/:id/visit", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id) || 0;
+      const p = (await pool.query("select * from partners where id = $1", [id])).rows[0];
+      if (!p || p.trade === OWN_CREW_SERVICE) return next();
+      const standard = await loadStandard(pool);
+      const visit = {
+        on: String(req.body.visit_on || ""),
+        place: String(req.body.place || "").trim().slice(0, 120),
+        notes: String(req.body.visit_notes || "").trim().slice(0, 1000),
+        give: TIERS.includes(req.body.visit_tier) ? req.body.visit_tier : "",
+        ...scoreVisit(standard, metFromForm(standard, req.body))
+      };
+      const fail = async (message) => res.status(400).send(await partnerPage(req, p, { visitError: "The visit wasn’t saved. " + message, shown: visit }));
+      if (!isDay(visit.on) || visit.on > today()) return fail("Enter the date of the visit. It can’t be in the future.");
+      const approved = p.status === "verified";
+      const approve = !approved && req.body.then === "approve";
+      if (approve && !visit.passed) return fail("It doesn’t meet every must-meet item, so the company can’t be approved yet. Tick the items it met, or choose Save the visit only.");
+      // An approved company is renewed by any visit that meets the standard. A company that isn't
+      // approved yet also needs its paperwork: without it the visit is kept, and the page says what is left.
+      if (visit.passed && (approved || (approve && !missingPaperwork(p).length))) {
+        await approveFrom(p, visit, standard);
+      } else {
+        await pool.query("update partners set visit = $1 where id = $2", [JSON.stringify(visit), id]);
+      }
+      res.redirect(303, "/admin/partners/" + id + "#visit");
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Approve a company from the visit already on file, once its paperwork is checked.
+  router.post("/partners/:id/approve", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id) || 0;
+      const p = (await pool.query("select * from partners where id = $1", [id])).rows[0];
+      if (!p || p.trade === OWN_CREW_SERVICE) return next();
+      const problem = partnerProblem({ ...p, status: "verified" });
+      if (problem) return res.status(400).send(await partnerPage(req, p, { visitError: problem }));
+      await approveFrom(p, p.visit, await loadStandard(pool));
+      res.redirect(303, "/admin/partners/" + id + "#visit");
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The certificate the owner gives an approved company.
+  router.get("/partners/:id/certificate", async (req, res, next) => {
+    try {
+      const p = (await pool.query("select * from partners where id = $1", [Number(req.params.id) || 0])).rows[0];
+      if (!p || p.status !== "verified" || !p.approved_on || p.trade === OWN_CREW_SERVICE) return next();
+      res.send(certificatePage({
+        company: p.company, service: p.trade, number: certificateNo(p.id),
+        approved: formatDay(p.approved_on), validThrough: formatDay(p.review_due), back: "/admin/partners/" + p.id + "#visit",
+        expired: Boolean(p.review_due) && p.review_due < today()
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The standard: what the owner scores at a site visit. See server/lib/standard.js.
+  function standardForm(standard, { error = "", saved = false } = {}) {
+    const kinds = (item) => [["must", "Must meet"]].concat(Array.from({ length: MAX_POINTS }, (unused, n) => [String(n + 1), plural(n + 1, "point", "points")]))
+      .map(([value, label]) => `<option value="${value}"${(item.kind === "must" ? "must" : String(item.points)) === value ? " selected" : ""}>${label}</option>`).join("");
+    const blank = { label: "", kind: "must", points: 0 };
+    // A text area, so a long item wraps on a phone instead of running out of sight.
+    const rows = standard.items.concat([blank, blank, blank]).map((item, index) => `<li class="standard-row">
+          <div class="field"><label for="label_${index}">${index < standard.items.length ? "Item " + (index + 1) : "New item"}</label><textarea id="label_${index}" name="label_${index}" rows="${Math.min(5, Math.max(2, Math.ceil(String(item.label).length / 30)))}" maxlength="${MAX_LABEL}">${esc(item.label)}</textarea></div>
+          <div class="field"><label for="kind_${index}">Counts as</label><select id="kind_${index}" name="kind_${index}">${kinds(item)}</select></div>
+        </li>`).join("\n        ");
+    return `    <form class="quote-form" method="post" action="/admin/standard">
+      ${csrfField}
+      ${error ? `<p class="form-error" role="alert">${esc(error)}</p>` : ""}
+      ${saved ? '<p class="visit-result" role="status"><strong>Saved.</strong> Your next site visit will use this standard.</p>' : ""}
+      <section class="form-part">
+        <h2>What you score at a visit</h2>
+        <p class="form-note">A company has to meet every &ldquo;Must meet&rdquo; item to be approved. Items worth points add up to suggest its tier. To remove an item, clear its words. Add new ones in the empty rows at the end.</p>
+        <ol class="standard-list">
+        ${rows}
+        </ol>
+      </section>
+      <section class="form-part">
+        <h2>Points for each tier</h2>
+        <p class="form-note">The items above add up to ${plural(possiblePoints(standard), "point", "points")}. A company that meets the must-meet items starts in Affordable.</p>
+        <div class="fields">
+          <div class="field"><label for="mid">Points needed for Mid-range</label><input id="mid" name="mid" type="number" inputmode="numeric" min="0" max="200" value="${esc(standard.mid)}" required></div>
+          <div class="field"><label for="premium">Points needed for Premium</label><input id="premium" name="premium" type="number" inputmode="numeric" min="0" max="200" value="${esc(standard.premium)}" required></div>
+        </div>
+      </section>
+      <section class="form-part">
+        <h2>How long an approval lasts</h2>
+        <p class="form-note">After this many months the company shows up on your Partners page as due for another visit.</p>
+        <div class="fields">
+          <div class="field"><label for="review_months">Months until the next visit</label><input id="review_months" name="review_months" type="number" inputmode="numeric" min="1" max="60" value="${esc(standard.reviewMonths)}" required></div>
+        </div>
+        <p class="form-note">Changing the standard doesn&rsquo;t change visits you&rsquo;ve already recorded.</p>
+      </section>
+      <button class="primary" type="submit">Save the standard</button>
+    </form>`;
+  }
+
+  const STANDARD_PAGE = {
+    ...PARTNER_PAGE, title: "Your standard", heading: "Your standard",
+    intro: "What a company has to show you at a site visit to earn your certification and a place on the approved vendor list."
+  };
+
+  router.get("/standard", async (req, res, next) => {
+    try {
+      res.send(adminPage(req, { ...STANDARD_PAGE, body: standardForm(await loadStandard(pool), { saved: req.query.saved === "1" }) }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/standard", async (req, res, next) => {
+    try {
+      const { standard, problem } = standardFromForm(req.body);
+      if (problem) {
+        // Show the owner what they typed, so nothing has to be entered again.
+        const typed = { items: [], mid: req.body.mid, premium: req.body.premium, reviewMonths: req.body.review_months };
+        for (let index = 0; req.body["label_" + index] !== undefined && index < 60; index += 1) {
+          const label = String(req.body["label_" + index]).trim().slice(0, MAX_LABEL);
+          const kind = String(req.body["kind_" + index] || "must");
+          if (label) typed.items.push({ label, kind: kind === "must" ? "must" : "points", points: kind === "must" ? 0 : Math.min(MAX_POINTS, Math.max(1, Number(kind) || 1)) });
+        }
+        return res.status(400).send(adminPage(req, { ...STANDARD_PAGE, body: standardForm(typed, { error: problem }) }));
+      }
+      await saveStandard(pool, standard);
+      res.redirect(303, "/admin/standard?saved=1");
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The approved vendor list as an Excel file, built from the database when it is asked for.
+  router.get("/approved.xlsx", async (req, res, next) => {
+    try {
+      const dashboard = hostSignin ? config.dashboardUrl : req.protocol + "://" + req.get("host");
+      const vendors = (await pool.query("select * from partners where status = 'verified' and trade <> $1 order by company", [OWN_CREW_SERVICE])).rows;
+      const day = (value) => (isDay(value) ? new Date(value + "T12:00:00Z") : null);
+      const file = workbook([{
+        name: "Approved vendors",
+        columns: [
+          { header: "Certificate", type: "link", width: 13 }, { header: "Company", width: 30 }, { header: "Service", width: 26 }, { header: "Tier", width: 12 },
+          { header: "Approved", type: "date", width: 14 }, { header: "Visit again by", type: "date", width: 15 }, { header: "Last visit", type: "date", width: 14 },
+          { header: "What was visited", width: 30 }, { header: "Must-meet items met", type: "int", width: 19 }, { header: "Must-meet items", type: "int", width: 16 },
+          { header: "Tier points", type: "int", width: 12 }, { header: "Points possible", type: "int", width: 15 },
+          { header: "Contact", width: 22 }, { header: "Phone", width: 16 }, { header: "Email", width: 28 }, { header: "Areas served", width: 28 },
+          { header: "Years in business", width: 17 }, { header: "License number", width: 18 }, { header: "Visit notes", width: 60 }
+        ],
+        rows: vendors.map((v) => {
+          const visit = v.visit && v.visit.on ? v.visit : {};
+          return [
+            { text: certificateNo(v.id), url: dashboard + "/admin/partners/" + v.id }, v.company, v.trade, v.tier,
+            day(v.approved_on), day(v.review_due), day(visit.on), visit.place || "",
+            visit.on ? visit.mustMet : null, visit.on ? visit.mustTotal : null, visit.on ? visit.points : null, visit.on ? visit.possible : null,
+            v.contact_name, v.phone, v.email, v.areas, v.years, v.license_no, visit.notes || ""
+          ];
+        })
+      }]);
+      res.set({
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": 'attachment; filename="AT-Legacy-approved-vendors-' + today() + '.xlsx"',
+        "Content-Length": String(file.length)
+      });
+      res.send(file);
     } catch (error) {
       next(error);
     }
