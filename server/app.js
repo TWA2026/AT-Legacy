@@ -1,6 +1,8 @@
+const fs = require("node:fs");
 const path = require("node:path");
 const express = require("express");
 const { page } = require("./lib/html");
+const { stampPage } = require("./lib/stamp");
 const { createNotifier } = require("./lib/notify");
 
 const SITE_DIR = path.join(__dirname, "..", "site");
@@ -114,10 +116,22 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
       app.use("/admin", privatePage, require("./routes/admin")(shared));
     }
 
+    // The public pages. Each names its stylesheet and scripts by fingerprint and is checked again on
+    // every visit, so a new page never loads with a stylesheet a browser saved from an older one.
+    const PAGES = { "/": "index.html", "/index.html": "index.html", "/quote": "quote.html", "/quote.html": "quote.html", "/partners": "partners.html", "/partners.html": "partners.html" };
+    const stampedPages = new Map();
+    const sitePage = (file) => {
+      if (!stampedPages.has(file)) stampedPages.set(file, stampPage(fs.readFileSync(path.join(SITE_DIR, file), "utf8"), SITE_DIR));
+      return stampedPages.get(file);
+    };
+    app.get(Object.keys(PAGES), (req, res) => {
+      res.set("Cache-Control", "no-cache").type("html").send(sitePage(PAGES[req.path]));
+    });
+
     app.use(express.static(SITE_DIR, { extensions: ["html"], maxAge: "10m" }));
 
     app.use((req, res) => {
-      res.status(404).sendFile(path.join(SITE_DIR, "404.html"));
+      res.status(404).set("Cache-Control", "no-cache").type("html").send(sitePage("404.html"));
     });
   }
 

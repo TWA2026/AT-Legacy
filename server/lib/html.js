@@ -1,20 +1,11 @@
 // Server-rendered pages. Every value that reaches a page goes through esc().
 
-const crypto = require("node:crypto");
-const fs = require("node:fs");
 const path = require("node:path");
+const { fingerprint } = require("./stamp");
 
-// Each file's address carries a fingerprint of its contents. When a file changes, its address
-// changes, so a browser never pairs a new page with a stylesheet it saved earlier.
-function stamped(file) {
-  let mark = "0";
-  try {
-    mark = crypto.createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "..", "site", file))).digest("hex").slice(0, 10);
-  } catch (error) {
-    // A missing file still gets an address. The page will simply load without it.
-  }
-  return "/" + file + "?v=" + mark;
-}
+// Each file's address carries a fingerprint of its contents (see stamp.js).
+const SITE_DIR = path.join(__dirname, "..", "..", "site");
+const stamped = (file) => "/" + file + "?v=" + fingerprint(SITE_DIR, file);
 
 const STYLES = stamped("styles.css");
 const SCRIPT = stamped("app.js");

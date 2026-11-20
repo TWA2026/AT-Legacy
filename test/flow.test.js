@@ -8,6 +8,7 @@ const { createApp, readConfig } = require("../server/app");
 const { parseAiBrief } = require("../server/lib/brief");
 const { dollarsToCents, formatDollars } = require("../server/lib/validate");
 const { spawnSync } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -114,8 +115,29 @@ test("health check, static site, and 404", async () => {
   assert.equal(await (await site.get("/healthz")).text(), "ok");
   const home = await site.get("/");
   assert.equal(home.status, 200);
-  assert.match(await home.text(), /One request\. Three quotes/);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /One request\. Three quotes/);
   assert.match(home.headers.get("content-security-policy"), /default-src 'self'/);
+  // Pages name their stylesheet and scripts by fingerprint, and browsers check each page again on every visit.
+  const mark = (file) => crypto.createHash("sha256").update(fs.readFileSync(path.join(__dirname, "..", "site", file))).digest("hex").slice(0, 10);
+  assert.equal(home.headers.get("cache-control"), "no-cache");
+  assert.ok(homeHtml.includes('href="styles.css?v=' + mark("styles.css") + '"'));
+  assert.ok(homeHtml.includes('src="home.js?v=' + mark("home.js") + '"'));
+  assert.ok(homeHtml.includes('href="fonts/alfa-slab-one-latin-400-normal.woff2"'));
+  for (const [address, script] of [["/quote", "quote.js"], ["/quote.html", "quote.js"], ["/partners", "partners.js"], ["/index.html", "home.js"]]) {
+    const response = await site.get(address);
+    const html = await response.text();
+    assert.equal(response.status, 200, address);
+    assert.equal(response.headers.get("cache-control"), "no-cache", address);
+    assert.ok(html.includes('href="styles.css?v=' + mark("styles.css") + '"'), address);
+    assert.ok(html.includes('src="' + script + "?v=" + mark(script) + '"'), address);
+  }
+  const sheet = await site.get("/styles.css?v=" + mark("styles.css"));
+  assert.equal(sheet.status, 200);
+  assert.match(sheet.headers.get("content-type"), /text\/css/);
+  const missing = await site.get("/nope");
+  assert.equal(missing.headers.get("cache-control"), "no-cache");
+  assert.ok((await missing.text()).includes('href="/styles.css?v=' + mark("styles.css") + '"'));
   assert.equal((await site.get("/quote")).status, 200);
   assert.equal((await site.get("/nope")).status, 404);
   assert.equal((await site.get("/r/unknown-token")).status, 404);
@@ -469,10 +491,16 @@ test("the static copy of the public pages is built to send to the hub", () => {
     assert.ok(fs.existsSync(path.join(dist, file)), file);
   }
   assert.ok(!fs.existsSync(path.join(dist, "app.js")));
+  // Each built page names its files by fingerprint. The built config.js differs from the hub's, so its fingerprint does too.
+  const mark = (file) => crypto.createHash("sha256").update(fs.readFileSync(path.join(dist, file))).digest("hex").slice(0, 10);
+  assert.ok(fs.readFileSync(path.join(dist, "index.html"), "utf8").includes('href="styles.css?v=' + mark("styles.css") + '"'));
+  assert.ok(fs.readFileSync(path.join(dist, "index.html"), "utf8").includes('src="home.js?v=' + mark("home.js") + '"'));
+  assert.ok(fs.readFileSync(path.join(dist, "404.html"), "utf8").includes('href="/styles.css?v=' + mark("styles.css") + '"'));
   // config.js loads before the script that reads it.
   for (const page of ["quote", "partners"]) {
     const html = fs.readFileSync(path.join(dist, page + ".html"), "utf8");
-    assert.ok(html.indexOf('src="config.js"') > 0 && html.indexOf('src="config.js"') < html.indexOf('src="' + page + '.js"'), page);
+    const config = html.indexOf('src="config.js?v=' + mark("config.js") + '"');
+    assert.ok(config > 0 && config < html.indexOf('src="' + page + ".js?v=" + mark(page + ".js") + '"'), page);
   }
   fs.rmSync(dist, { recursive: true, force: true });
 });

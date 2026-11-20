@@ -4,10 +4,13 @@
 // files and told where the hub is (config.js), so the forms can send to it from
 // another address. The hub must list that address in SITE_ORIGINS.
 //
+// Each page's links to the stylesheet and scripts are given a fingerprint, as the hub does.
+//
 //   HUB_URL=https://hub.example.com node scripts/build-site.js
 
 const fs = require("node:fs");
 const path = require("node:path");
+const { stampPage } = require("../server/lib/stamp");
 
 const root = path.join(__dirname, "..");
 const out = path.join(root, "dist");
@@ -22,4 +25,7 @@ fs.cpSync(path.join(root, "site"), out, { recursive: true });
 // The dashboard's copy-button script is not part of the public pages.
 fs.rmSync(path.join(out, "app.js"), { force: true });
 fs.writeFileSync(path.join(out, "config.js"), "window.ATL_API = " + JSON.stringify(hub) + ";\n");
+for (const file of fs.readdirSync(out).filter((name) => name.endsWith(".html"))) {
+  fs.writeFileSync(path.join(out, file), stampPage(fs.readFileSync(path.join(out, file), "utf8"), out));
+}
 console.log("Built dist/ with the request API at " + hub);

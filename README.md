@@ -169,6 +169,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `server/lib/edge.js` | Checks the host's sign-in wall before the dashboard service opens |
 | `server/lib/links.js` | Names for private links, and the record of when each was sent and opened |
 | `server/lib/xlsx.js` | Writes the Excel download |
+| `server/lib/stamp.js` | Adds a fingerprint to each page's links to the stylesheet and scripts |
 | `server/lib/security.js` | Tokens, sessions, form tokens, rate limits |
 | `test/flow.test.js` | End-to-end tests |
 
@@ -179,6 +180,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 - **Home page drawing:** the site plan at the top of `site/index.html` is drawn in the page itself, 5 units to the foot. The gold fence measures 200 ft. The label on the drawing and the quote sheet beside it give the same figure, so change all three together.
 - **Service pictograms:** each service link in `site/index.html` has a small drawing before it, on a 48-unit grid. To add a service, copy one and redraw it.
 - **Styling drawings:** the pages' security header blocks styles written inside the HTML. Give a shape a class and style it in `site/styles.css`.
+- **Changes show up at once:** every page loads `styles.css` and its scripts by fingerprint, such as `styles.css?v=1a2b3c4d5e`. The hub adds it as it serves a page, and `scripts/build-site.js` adds it to the static copy. When a file changes, its address changes, so a browser never shows a new page with an old stylesheet. Write plain `href="styles.css"` in the pages; the fingerprint is added for you.
 - **Brand colors:** navy `#13283A`, bay blue `#2F5D7C`, sun gold `#F2B544`, sea glass `#A9D3CB`, shell `#F4F7F5`.
 
 Don't describe AT Legacy Services as a contractor or as licensed. Partner companies are independent, and the customer contracts with them directly.
