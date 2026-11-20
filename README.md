@@ -98,7 +98,8 @@ WorkOS handles passwords, email verification, and two-factor codes. The app only
 
 - The `at-legacy` static service serves a copy of `site/` at the domain. `scripts/build-site.js` writes the hub's address into `config.js`, so the request and partner forms send to the hub.
 - The hub lists the domain in `SITE_ORIGINS`, which lets pages at that address call `/api`.
-- After a customer sends a request, they land on their private page at the hub's Slipway address. Partner quote links use that address too (`PUBLIC_URL`).
+- After a customer sends a request, they land on their private page at the hub's Slipway address.
+- `PUBLIC_URL` is the domain, so the links you copy from the dashboard read `https://atlegacyservices.com/r/...` and `/q/...`. The static service forwards those, and `/admin`, to the hub and the dashboard (`redirects:` in the spec). The same links keep working after the hub moves onto the domain.
 - The static service sets the security headers the hub would send, plus permission to call the hub (`headers:` in the spec).
 
 To go back to the earlier site, set the `at-legacy` build command to `npm run build` in the Slipway spec and deploy. That serves `legacy-site/`.
@@ -109,7 +110,7 @@ Slipway serves static sites and apps from different places. The domain's DNS rec
 
 1. In Cloudflare DNS, change the `atlegacyservices.com` record (shown as `@`) to a CNAME for `lb.onslipway.sh`, proxy status **DNS only**. Wait until the site loads without a certificate warning.
 2. In Slipway, remove `atlegacyservices.com` from `at-legacy` (**Networking**, **Also served at**) and add it to `hub` the same way.
-3. Set `PUBLIC_URL` to `https://atlegacyservices.com` on `hub` and `dashboard`, and redeploy them.
+3. Check the site, a request, and a private link at the domain.
 
 After that the private pages are on the domain too, and the `at-legacy` service, `legacy-site/`, and the build scripts can be removed.
 

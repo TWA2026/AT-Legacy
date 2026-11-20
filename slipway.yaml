@@ -33,6 +33,20 @@ services:
           X-Content-Type-Options: nosniff
           X-Frame-Options: DENY
           Referrer-Policy: no-referrer
+    # Private links and the dashboard live on the hub and dashboard services.
+    redirects:
+      - from: /admin
+        to: https://dashboard-7ac3f48e.onslipway.sh/admin
+        status: 302
+      - from: /admin/*
+        to: https://dashboard-7ac3f48e.onslipway.sh/admin
+        status: 302
+      - from: /r/*
+        to: https://hub-00dd216e.onslipway.sh/r/:splat
+        status: 302
+      - from: /q/*
+        to: https://hub-00dd216e.onslipway.sh/q/:splat
+        status: 302
 
   - name: hub
     rootDir: .
