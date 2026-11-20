@@ -63,24 +63,93 @@
         <p class="area">Free for homeowners. Starting in Land O&rsquo; Lakes and nearby Pasco County communities.</p>
       </div>
 
-      <div class="sheet">
-        <p class="sheet-job"><span>Example request</span><strong>New backyard fence</strong></p>
-        <a class="tier-card" href="quote.html?tier=Affordable">
-          <span class="tier-name">Affordable</span>
-          <span class="marks" role="img" aria-label="Lowest price"><b>$</b>$$</span>
-          <span class="tier-line">The lowest price from a verified company.</span>
-        </a>
-        <a class="tier-card" href="quote.html?tier=Mid-range">
-          <span class="tier-name">Mid-range</span>
-          <span class="marks" role="img" aria-label="Middle price"><b>$$</b>$</span>
-          <span class="tier-line">An established company with a written warranty.</span>
-        </a>
-        <a class="tier-card" href="quote.html?tier=Premium">
-          <span class="tier-name">Premium</span>
-          <span class="marks" role="img" aria-label="Highest price"><b>$$$</b></span>
-          <span class="tier-line">Our most experienced partner, with priority scheduling.</span>
-        </a>
-        <p class="sheet-note">Ask for one tier or all three. You hire and pay the company you choose directly.</p>
+      <div class="hero-visual">
+        <!-- The site plan. It is drawn 5 units to the foot: the gold fence path is 1,000 units, the 200 ft the sheet quotes.
+             Lines with class "draw" are drawn in when the page loads. See "Hero" in styles.css. -->
+        <div class="plan-crop">
+          <svg class="plan" viewBox="-230 0 730 640" role="img" aria-labelledby="plan-title plan-desc">
+            <title id="plan-title">Site plan of an example home</title>
+            <desc id="plan-desc">A house seen from above, with a driveway, a lanai, a pool, and a pond behind the lot. A new fence around the back yard is drawn in gold.</desc>
+            <defs>
+            <pattern id="pl-pavers" width="12" height="12" patternUnits="userSpaceOnUse"><path d="M0 .5H12M0 6.5H12M3 .5V6.5M9 6.5V12.5" fill="none" stroke="#a9d3cb" stroke-opacity=".26" stroke-width=".8"/></pattern>
+            <pattern id="pl-lawn" width="26" height="26" patternUnits="userSpaceOnUse" patternTransform="rotate(-32)"><rect width="13" height="26" fill="#a9d3cb" fill-opacity=".04"/></pattern>
+            </defs>
+            <g class="fade">
+            <path class="pl-line pl-thin" d="M-230 30H500"/>
+            <path class="pl-line" d="M-230 34H500"/>
+            <path class="pl-line pl-thin" d="M-230 56H500M-230 78H500"/>
+            <path class="pl-line pl-faint" d="M-213 56V78M-188 56V78M-163 56V78M-138 56V78M-113 56V78M-88 56V78M-63 56V78M-38 56V78M-13 56V78M12 56V78M37 56V78M62 56V78M87 56V78M112 56V78M137 56V78M162 56V78M187 56V78M212 56V78M237 56V78M262 56V78M287 56V78M312 56V78M337 56V78M362 56V78M387 56V78M412 56V78M437 56V78M462 56V78M487 56V78"/>
+            </g>
+            <rect class="fade" x="62" y="78" width="375" height="500" fill="url(#pl-lawn)"/>
+            <path class="pl-line pl-dash fade" d="M62 78V578H437V78"/>
+            <path class="pl-line pl-dash pl-faint fade" d="M-230 578H62M437 578H500"/>
+            <path class="pl-ground" d="M-99 78V56L-107 34H-3L-11 56V78Z"/>
+            <path class="pl-line pl-faint draw" pathLength="1" d="M-99 150V56L-107 34M-3 34L-11 56V150"/>
+            <g class="pl-pin fade"><circle cx="62" cy="78" r="2.6"/><circle cx="62" cy="578" r="2.6"/><circle cx="437" cy="78" r="2.6"/><circle cx="437" cy="578" r="2.6"/></g>
+            <path class="pl-water fade" d="M-230 618C-160 600 -70 610 10 602S180 590 262 599S410 614 500 596V640H-230Z"/>
+            <path class="pl-line pl-thin draw" pathLength="1" d="M300 620q6 -5 12 0t12 0t12 0t12 0M316 631q6 -5 12 0t12 0t12 0"/>
+            <path class="pl-ground" d="M115 178V56L107 34H211L203 56V178Z"/>
+            <path class="pl-line draw" pathLength="1" d="M115 178V56L107 34M211 34L203 56V178"/>
+            <path class="pl-line pl-faint fade" d="M115 96H203M115 138H203"/>
+            <path class="pl-ground" d="M203 188H324V238H304V208H203Z"/>
+            <path class="fade" fill="url(#pl-pavers)" d="M203 188H324V238H304V208H203Z"/>
+            <path class="pl-line draw" pathLength="1" d="M203 188H324V238M304 238V208H203"/>
+            <rect class="pl-ground" x="139" y="418" width="240" height="120"/>
+            <rect class="fade" x="139" y="418" width="240" height="120" fill="url(#pl-pavers)"/>
+            <path class="pl-line draw" pathLength="1" d="M139 418V538H379V418"/>
+            <g class="pl-pin fade"><rect x="137.4" y="456.4" width="3.2" height="3.2"/><rect x="137.4" y="496.4" width="3.2" height="3.2"/><rect x="137.4" y="536.4" width="3.2" height="3.2"/><rect x="177.4" y="536.4" width="3.2" height="3.2"/><rect x="217.4" y="536.4" width="3.2" height="3.2"/><rect x="257.4" y="536.4" width="3.2" height="3.2"/><rect x="297.4" y="536.4" width="3.2" height="3.2"/><rect x="337.4" y="536.4" width="3.2" height="3.2"/><rect x="377.4" y="536.4" width="3.2" height="3.2"/><rect x="377.4" y="496.4" width="3.2" height="3.2"/><rect x="377.4" y="456.4" width="3.2" height="3.2"/></g>
+            <path class="pl-line pl-dash pl-thin fade" d="M179 418V446H339V418"/>
+            <path class="pl-ground" d="M192 458H306A18 18 0 0 1 324 476V504A18 18 0 0 1 306 522H192A18 18 0 0 1 174 504V476A18 18 0 0 1 192 458ZM336 490A15 15 0 1 1 366 490A15 15 0 1 1 336 490Z"/>
+            <path class="pl-water draw" pathLength="1" d="M192 458H306A18 18 0 0 1 324 476V504A18 18 0 0 1 306 522H192A18 18 0 0 1 174 504V476A18 18 0 0 1 192 458Z"/>
+            <path class="pl-line pl-thin draw" pathLength="1" d="M229 494q5 -4 10 0t10 0t10 0t10 0M234 504q5 -4 10 0t10 0t10 0"/>
+            <path class="pl-water draw" pathLength="1" d="M336 490A15 15 0 1 1 366 490A15 15 0 1 1 336 490Z"/>
+            <path class="pl-ground" d="M99 178H219V218H289V238H339V218H399V418H99Z"/>
+            <path class="pl-wall draw" pathLength="1" d="M99 178H219V218H289V238H339V218H399V418H99Z"/>
+            <path class="pl-line pl-faint draw" pathLength="1" d="M99 218L199 318H299L399 218M99 418L199 318M399 418L299 318M99 178L159 238L219 178M159 238V278L219 218"/>
+            <path class="pl-door draw" pathLength="1" d="M119 182H199"/>
+            <path class="pl-line pl-thin draw" pathLength="1" d="M304 238V224A14 14 0 0 1 318 238"/>
+            <path class="pl-line pl-thin draw" pathLength="1" d="M407 330h13v13h-13zM407 330l13 13M420 330l-13 13M407 350h13v13h-13zM407 350l13 13M420 350l-13 13"/>
+            <path class="pl-tree draw" pathLength="1" d="M404.5 136A11.9 11.9 0 0 1 393.9 152A11.9 11.9 0 0 1 376.4 159.7A11.9 11.9 0 0 1 357.4 156.7A11.9 11.9 0 0 1 343.1 144A11.9 11.9 0 0 1 338 125.5A11.9 11.9 0 0 1 343.7 107.2A11.9 11.9 0 0 1 358.3 94.9A11.9 11.9 0 0 1 377.3 92.4A11.9 11.9 0 0 1 394.6 100.6A11.9 11.9 0 0 1 404.8 116.9A11.9 11.9 0 0 1 404.5 136Z"/>
+            <path class="pl-tree draw" pathLength="1" d="M374 204A4.3 4.3 0 0 1 371 210.3A4.3 4.3 0 0 1 364.2 211.8A4.3 4.3 0 0 1 358.8 207.5A4.3 4.3 0 0 1 358.8 200.5A4.3 4.3 0 0 1 364.2 196.2A4.3 4.3 0 0 1 371 197.7A4.3 4.3 0 0 1 374 204Z"/>
+            <path class="pl-tree draw" pathLength="1" d="M387.1 209.4A3.8 3.8 0 0 1 382.2 212.9A3.8 3.8 0 0 1 376.4 211.2A3.8 3.8 0 0 1 374 205.6A3.8 3.8 0 0 1 376.9 200.3A3.8 3.8 0 0 1 382.9 199.3A3.8 3.8 0 0 1 387.5 203.3A3.8 3.8 0 0 1 387.1 209.4Z"/>
+            <path class="pl-tree draw" pathLength="1" d="M358.4 208.3A3.5 3.5 0 0 1 355 212.8A3.5 3.5 0 0 1 349.3 212.9A3.5 3.5 0 0 1 345.7 208.6A3.5 3.5 0 0 1 346.8 203.1A3.5 3.5 0 0 1 351.8 200.5A3.5 3.5 0 0 1 357 202.8A3.5 3.5 0 0 1 358.4 208.3Z"/>
+            <path class="pl-tree draw" pathLength="1" d="M94 448A5.2 5.2 0 0 1 90.8 455.8A5.2 5.2 0 0 1 83 459A5.2 5.2 0 0 1 75.2 455.8A5.2 5.2 0 0 1 72 448A5.2 5.2 0 0 1 75.2 440.2A5.2 5.2 0 0 1 83 437A5.2 5.2 0 0 1 90.8 440.2A5.2 5.2 0 0 1 94 448Z"/>
+            <path class="pl-tree draw" pathLength="1" d="M104.3 563.5A4.3 4.3 0 0 1 99.4 568.3A4.3 4.3 0 0 1 92.5 568.3A4.3 4.3 0 0 1 87.7 563.4A4.3 4.3 0 0 1 87.7 556.5A4.3 4.3 0 0 1 92.6 551.7A4.3 4.3 0 0 1 99.5 551.7A4.3 4.3 0 0 1 104.3 556.6A4.3 4.3 0 0 1 104.3 563.5Z"/>
+            <path class="pl-tree draw" pathLength="1" d="M130 556A4.7 4.7 0 0 1 127.1 563.1A4.7 4.7 0 0 1 120 566A4.7 4.7 0 0 1 112.9 563.1A4.7 4.7 0 0 1 110 556A4.7 4.7 0 0 1 112.9 548.9A4.7 4.7 0 0 1 120 546A4.7 4.7 0 0 1 127.1 548.9A4.7 4.7 0 0 1 130 556Z"/>
+            <circle class="pl-pin fade" cx="372" cy="126" r="2.4"/>
+            <path class="pl-tree draw" pathLength="1" d="M85 128Q93.1 132.9 103.6 131.8Q94.4 126.7 85 128M85 128Q86.3 137.4 93.7 144.9Q91.9 134.5 85 128M85 128Q78.4 134.9 77.2 145.3Q84.2 137.5 85 128M85 128Q75.5 127.1 66.6 132.7Q77.1 133.3 85 128M85 128Q79.8 120.1 69.9 116.5Q75.9 125.1 85 128M85 128Q87.9 119 84.5 109Q81.6 119.1 85 128M85 128Q93.9 124.7 99.6 115.8Q89.8 119.8 85 128"/>
+            <circle class="pl-pin fade" cx="85" cy="128" r="2.4"/>
+            <path class="pl-tree draw" pathLength="1" d="M418 508Q424.4 511.9 432.7 511Q425.4 507 418 508M418 508Q419 515.4 424.8 521.4Q423.4 513.2 418 508M418 508Q412.8 513.4 411.8 521.7Q417.4 515.5 418 508M418 508Q410.5 507.3 403.5 511.7Q411.8 512.2 418 508M418 508Q413.9 501.7 406 498.9Q410.9 505.7 418 508M418 508Q420.3 500.9 417.6 493Q415.3 501 418 508M418 508Q425 505.4 429.5 498.4Q421.8 501.5 418 508"/>
+            <circle class="pl-pin fade" cx="418" cy="508" r="2.4"/>
+            <path class="pl-tree draw" pathLength="1" d="M414 232Q419.1 235.1 425.8 234.4Q419.9 231.2 414 232M414 232Q414.8 237.9 419.5 242.7Q418.4 236.1 414 232M414 232Q409.8 236.3 409.1 242.9Q413.5 238 414 232M414 232Q408 231.5 402.4 235Q409 235.3 414 232M414 232Q410.7 227 404.4 224.7Q408.3 230.2 414 232M414 232Q415.9 226.3 413.7 220Q411.9 226.4 414 232M414 232Q419.6 229.9 423.2 224.3Q417 226.8 414 232"/>
+            <circle class="pl-pin fade" cx="414" cy="232" r="2.4"/>
+            <g class="pl-light fade"><circle class="ring" cx="109" cy="150" r="6.5"/><circle cx="109" cy="150" r="2.2"/><circle class="ring" cx="109" cy="104" r="6.5"/><circle cx="109" cy="104" r="2.2"/><circle class="ring" cx="209" cy="150" r="6.5"/><circle cx="209" cy="150" r="2.2"/><circle class="ring" cx="209" cy="104" r="6.5"/><circle cx="209" cy="104" r="2.2"/><circle class="ring" cx="236" cy="182" r="6.5"/><circle cx="236" cy="182" r="2.2"/><circle class="ring" cx="270" cy="182" r="6.5"/><circle cx="270" cy="182" r="2.2"/><circle class="ring" cx="330" cy="196" r="6.5"/><circle cx="330" cy="196" r="2.2"/></g>
+            <path class="pl-fence draw-late" pathLength="1" d="M99 288H93M73 288H67V573H432V288H426M406 288H399"/>
+            <g class="pl-post fade-late"><rect x="64.4" y="285.4" width="5.2" height="5.2"/><rect x="64.4" y="326.1" width="5.2" height="5.2"/><rect x="64.4" y="366.8" width="5.2" height="5.2"/><rect x="64.4" y="407.5" width="5.2" height="5.2"/><rect x="64.4" y="448.3" width="5.2" height="5.2"/><rect x="64.4" y="489" width="5.2" height="5.2"/><rect x="64.4" y="529.7" width="5.2" height="5.2"/><rect x="64.4" y="570.4" width="5.2" height="5.2"/><rect x="105" y="570.4" width="5.2" height="5.2"/><rect x="145.5" y="570.4" width="5.2" height="5.2"/><rect x="186.1" y="570.4" width="5.2" height="5.2"/><rect x="226.6" y="570.4" width="5.2" height="5.2"/><rect x="267.2" y="570.4" width="5.2" height="5.2"/><rect x="307.7" y="570.4" width="5.2" height="5.2"/><rect x="348.3" y="570.4" width="5.2" height="5.2"/><rect x="388.8" y="570.4" width="5.2" height="5.2"/><rect x="429.4" y="570.4" width="5.2" height="5.2"/><rect x="429.4" y="529.7" width="5.2" height="5.2"/><rect x="429.4" y="489" width="5.2" height="5.2"/><rect x="429.4" y="448.3" width="5.2" height="5.2"/><rect x="429.4" y="407.5" width="5.2" height="5.2"/><rect x="429.4" y="366.8" width="5.2" height="5.2"/><rect x="429.4" y="326.1" width="5.2" height="5.2"/><rect x="429.4" y="285.4" width="5.2" height="5.2"/><rect x="70.4" y="285.4" width="5.2" height="5.2"/><rect x="90.4" y="285.4" width="5.2" height="5.2"/><rect x="403.4" y="285.4" width="5.2" height="5.2"/><rect x="423.4" y="285.4" width="5.2" height="5.2"/></g>
+            <path class="pl-gate draw-late" pathLength="1" d="M93 288L80.7 303.8M73 288A20 20 0 0 0 80.7 303.8M406 288L418.3 303.8M426 288A20 20 0 0 1 418.3 303.8"/>
+            <g class="fade"><circle class="pl-line pl-thin" cx="468" cy="126" r="13"/><path class="pl-pin" d="M468 116l5 17l-5 -4l-5 4z"/><path class="pl-line pl-thin" d="M444 170v-5h50v5M469 165v3"/></g>
+            <g class="fade-late"><text class="pl-label" x="330" y="22" text-anchor="middle">Legacy Lane</text><text class="pl-label" x="159" y="124" text-anchor="middle">Driveway</text><text class="pl-label" x="249" y="372" text-anchor="middle">House</text><text class="pl-label" x="259" y="438" text-anchor="middle">Lanai</text><text class="pl-label" x="249" y="484" text-anchor="middle">Pool</text><text class="pl-label" x="150" y="626" text-anchor="middle">Pond</text><text class="pl-label pl-small" x="468" y="106" text-anchor="middle">N</text><text class="pl-label pl-small" x="469" y="184" text-anchor="middle">10 ft</text><text class="pl-label pl-gold" x="262" y="561" text-anchor="middle">New fence, 200 ft</text></g>
+          </svg>
+        </div>
+        <div class="sheet">
+          <p class="sheet-job"><span>Example request</span><strong>New backyard fence</strong><span>200 ft, two gates</span></p>
+          <a class="tier-card" href="quote.html?tier=Affordable">
+            <span class="tier-name">Affordable</span>
+            <span class="marks" aria-hidden="true"><b>$</b>$$</span>
+            <span class="tier-line">Lowest price</span>
+          </a>
+          <a class="tier-card" href="quote.html?tier=Mid-range">
+            <span class="tier-name">Mid-range</span>
+            <span class="marks" role="img" aria-label="Middle price"><b>$$</b>$</span>
+            <span class="tier-line">Written warranty</span>
+          </a>
+          <a class="tier-card" href="quote.html?tier=Premium">
+            <span class="tier-name">Premium</span>
+            <span class="marks" role="img" aria-label="Highest price"><b>$$$</b></span>
+            <span class="tier-line">Most experienced partner</span>
+          </a>
+          <p class="sheet-note">Ask for one tier or all three. You hire and pay the company you choose directly.</p>
+        </div>
       </div>
     </section>
 
@@ -127,27 +196,33 @@
         <p>Every company is verified. The tier tells you what you&rsquo;re paying for.</p>
       </div>
       <ul class="tiers">
-        <li>
-          <h3>Affordable</h3>
-          <span class="marks" role="img" aria-label="Lowest price"><b>$</b>$$</span>
+        <li class="tier-low">
+          <div class="tier-cap">
+            <h3>Affordable</h3>
+            <span class="marks" role="img" aria-label="Lowest price"><b>$</b>$$</span>
+          </div>
           <ul>
             <li>Lowest price of the three</li>
             <li>Often a smaller or newer crew</li>
             <li>Verified like every partner</li>
           </ul>
         </li>
-        <li>
-          <h3>Mid-range</h3>
-          <span class="marks" role="img" aria-label="Middle price"><b>$$</b>$</span>
+        <li class="tier-mid">
+          <div class="tier-cap">
+            <h3>Mid-range</h3>
+            <span class="marks" role="img" aria-label="Middle price"><b>$$</b>$</span>
+          </div>
           <ul>
             <li>Established local company</li>
             <li>Written warranty on the work</li>
             <li>Middle price</li>
           </ul>
         </li>
-        <li>
-          <h3>Premium</h3>
-          <span class="marks" role="img" aria-label="Highest price"><b>$$$</b></span>
+        <li class="tier-top">
+          <div class="tier-cap">
+            <h3>Premium</h3>
+            <span class="marks" role="img" aria-label="Highest price"><b>$$$</b></span>
+          </div>
           <ul>
             <li>Most experienced partner we have</li>
             <li>Longest warranty</li>
@@ -166,32 +241,73 @@
         <div>
           <h3>Outdoor projects</h3>
           <ul>
-            <li><a href="quote.html?service=Pool">Pools</a><span>Pool contractor license checked</span></li>
-            <li><a href="quote.html?service=Pavers%20or%20patio">Pavers and patios</a></li>
-            <li><a href="quote.html?service=Fence">Fences</a><span>Local license checked where required</span></li>
-            <li><a href="quote.html?service=Outdoor%20lighting">Outdoor lighting</a><span>Electrical license checked for wired systems</span></li>
-          </ul>
-        </div>
-        <div>
-          <h3>Home systems</h3>
-          <ul>
-            <li><a href="quote.html?service=Electrical%20work">Electrical work</a><span>Electrical contractor license checked</span></li>
-            <li><a href="quote.html?service=Water%20softener">Water softeners</a><span>Plumbing license checked</span></li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><rect class="wet" x="8" y="15" width="32" height="20" rx="8"/><path d="M15 23.5q2.5-2.6 5 0t5 0t5 0M18 29.5q2.5-2.6 5 0t5 0"/><path class="au" d="M31.5 11.5v7M35.5 11.5v7"/></svg>
+              <a href="quote.html?service=Pool">Pools</a>
+              <span>Pool contractor license checked</span>
+            </li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M9 13h30v22H9zM9 20.3h30M9 27.7h30M24 13v7.3M16.5 20.3v7.4M31.5 20.3v7.4M24 27.7V35"/><path class="au-fill" d="M17.6 21.4h12.8v5.2H17.6z"/></svg>
+              <a href="quote.html?service=Pavers%20or%20patio">Pavers and patios</a>
+            </li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M11 37V17l3.5-4.5L18 17v20M20.5 37V17l3.5-4.5 3.5 4.5v20M30 37V17l3.5-4.5L37 17v20"/><path class="au" d="M8 22h32M8 31.5h32"/></svg>
+              <a href="quote.html?service=Fence">Fences</a>
+              <span>Local license checked where required</span>
+            </li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M24 38V25M17.5 25h13L28 18h-8zM18 38h12"/><path class="au" d="M24 9v4M13.5 13l2.6 2.6M34.5 13l-2.6 2.6"/></svg>
+              <a href="quote.html?service=Outdoor%20lighting">Outdoor lighting</a>
+              <span>Electrical license checked for wired systems</span>
+            </li>
           </ul>
         </div>
         <div>
           <h3>Regular service</h3>
           <ul>
-            <li><a href="quote.html?service=House%20cleaning">House cleaning</a></li>
-            <li><a href="quote.html?service=Lawn%20mowing">Lawn mowing</a></li>
-            <li><a href="quote.html?service=Lawn%20care%20and%20fertilizing">Lawn care and fertilizing</a><span>Fertilizer certification checked</span></li>
-            <li><a href="quote.html?service=Lawn%20pest%20control">Lawn pest control</a><span>Pest control license checked</span></li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M14.5 27h14l3 12h-20zM18.5 31.5v7M22.5 31.5v7M26.5 31.5v7"/><path class="au" d="M22.5 27L31 9"/></svg>
+              <a href="quote.html?service=House%20cleaning">House cleaning</a>
+            </li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><rect x="9" y="26" width="23" height="8" rx="3"/><circle cx="14" cy="36.5" r="3.4"/><circle cx="29" cy="36.5" r="3.4"/><path d="M7 41.5h34"/><path class="au" d="M30.5 26L38 11M35 10.5h7"/></svg>
+              <a href="quote.html?service=Lawn%20mowing">Lawn mowing</a>
+            </li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path d="M11 38h26M24 38c0-9-1.5-15-7-21M24 38c-.4-11 .6-18 2-27M24 38c.8-8 4-13 10.5-17"/><circle class="au-fill" cx="12" cy="21" r="1.6"/><circle class="au-fill" cx="36.5" cy="13" r="1.6"/><circle class="au-fill" cx="17" cy="10.5" r="1.6"/></svg>
+              <a href="quote.html?service=Lawn%20care%20and%20fertilizing">Lawn care and fertilizing</a>
+              <span>Fertilizer certification checked</span>
+            </li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><ellipse cx="24" cy="27" rx="6.5" ry="9"/><circle cx="24" cy="14.5" r="3.4"/><path d="M24 18v18M17.8 23l-6-3M17.5 28h-7M18.5 33L13 37M30.2 23l6-3M30.5 28h7M29.5 33l5.5 4"/><path class="au" d="M10 41L39 9"/></svg>
+              <a href="quote.html?service=Lawn%20pest%20control">Lawn pest control</a>
+              <span>Pest control license checked</span>
+            </li>
+          </ul>
+        </div>
+        <div>
+          <h3>Home systems</h3>
+          <ul>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><rect x="13" y="8" width="22" height="32" rx="5"/><path d="M20.5 17v6.5M27.5 17v6.5"/><path class="au" d="M21.2 33.5v-1a2.8 2.8 0 0 1 5.6 0v1z"/></svg>
+              <a href="quote.html?service=Electrical%20work">Electrical work</a>
+              <span>Electrical contractor license checked</span>
+            </li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><rect x="16" y="13" width="16" height="26" rx="7"/><path class="au" d="M20.5 13V9.5h7V13"/><path class="wet" d="M24 20.5c-2.3 3.2-3.6 5.1-3.6 7a3.6 3.6 0 0 0 7.2 0c0-1.9-1.3-3.8-3.6-7z"/></svg>
+              <a href="quote.html?service=Water%20softener">Water softeners</a>
+              <span>Plumbing license checked</span>
+            </li>
           </ul>
         </div>
         <div>
           <h3>Repairs and upkeep</h3>
           <ul>
-            <li><a href="quote.html?service=Home%20repairs%20and%20upkeep">Paint touch-ups, door fixes, mounting, pressure washing</a><span>Done by our own crew, one quote</span></li>
+            <li>
+              <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><rect x="8" y="20" width="32" height="19" rx="2.5"/><path d="M8 27h32M18 20v-4a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v4"/><path class="au" d="M22 25h4v5h-4z"/></svg>
+              <a href="quote.html?service=Home%20repairs%20and%20upkeep">Paint touch-ups, door fixes, mounting, pressure washing</a>
+              <span>Done by our own crew, one quote</span>
+            </li>
           </ul>
         </div>
       </div>

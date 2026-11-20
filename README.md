@@ -154,6 +154,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `site/config.js` | Tells the forms where the API is. Empty on the hub; the static build fills in the hub's address |
 | `scripts/build-site.js` | Builds the static copy of `site/` that Slipway serves at the domain |
 | `legacy-site/` | The earlier public site, kept as a fallback (`npm run build`) |
+| `site/index.html`, `site/home.js` | Home page, with its site plan drawing and service pictograms |
 | `site/quote.html`, `site/quote.js` | Request form and brief review |
 | `site/partners.html`, `site/partners.js` | Partner application |
 | `server/index.js`, `server/app.js` | Server start-up and routing |
@@ -175,6 +176,9 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 
 - **Services:** change the list in `server/lib/catalog.js`, then match it in the `<select>` in `site/quote.html` and `site/partners.html` and the links in `site/index.html`.
 - **Tier wording:** `site/index.html` and `site/quote.html`.
+- **Home page drawing:** the site plan at the top of `site/index.html` is drawn in the page itself, 5 units to the foot. The gold fence measures 200 ft. The label on the drawing and the quote sheet beside it give the same figure, so change all three together.
+- **Service pictograms:** each service link in `site/index.html` has a small drawing before it, on a 48-unit grid. To add a service, copy one and redraw it.
+- **Styling drawings:** the pages' security header blocks styles written inside the HTML. Give a shape a class and style it in `site/styles.css`.
 - **Brand colors:** navy `#13283A`, bay blue `#2F5D7C`, sun gold `#F2B544`, sea glass `#A9D3CB`, shell `#F4F7F5`.
 
 Don't describe AT Legacy Services as a contractor or as licensed. Partner companies are independent, and the customer contracts with them directly.

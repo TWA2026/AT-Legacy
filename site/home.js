@@ -16,4 +16,18 @@
     seen.contact = entries[0].isIntersecting;
     update();
   }).observe(contact);
+
+  // The site plan draws itself once. Hold the drawing until it is on screen.
+  var plan = document.querySelector(".plan");
+  if (plan) {
+    var planSeen = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) {
+        plan.classList.remove("plan-hold");
+        planSeen.disconnect();
+      } else {
+        plan.classList.add("plan-hold");
+      }
+    }, { threshold: 0.25 });
+    planSeen.observe(plan);
+  }
 })();
