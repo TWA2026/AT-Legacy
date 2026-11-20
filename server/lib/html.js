@@ -11,7 +11,7 @@ function esc(value) {
 
 const BRAND = '<a class="brand" href="/" aria-label="AT Legacy Services, home"><img src="/favicon.svg" alt="" width="44" height="44"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>';
 
-function page({ title, heading, intro = "", body, nav = "", wide = false }) {
+function page({ title, heading, intro = "", body, wide = false }) {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -27,7 +27,6 @@ function page({ title, heading, intro = "", body, nav = "", wide = false }) {
 <body>
   <header class="quote-head">
     ${BRAND}
-    ${nav}
     <h1>${esc(heading)}</h1>
     ${intro ? `<p>${esc(intro)}</p>` : ""}
   </header>
@@ -35,6 +34,41 @@ function page({ title, heading, intro = "", body, nav = "", wide = false }) {
 ${body}
   </main>
   <footer class="quote-foot legal">&copy; 2026 AT Legacy Group LLC. Partner companies are independent. AT Legacy Services is not the contractor on their jobs.</footer>
+</body>
+</html>`;
+}
+
+// The owner's dashboard has its own frame: a gold strip, a compact bar, and tabs.
+// It should never be mistaken for a page that customers or companies see.
+const OWNER_BRAND = '<a class="brand" href="/admin" aria-label="AT Legacy Services dashboard"><img src="/favicon.svg" alt="" width="36" height="36"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>';
+
+function ownerPage({ title, heading, intro = "", body, tabs, current = "", back = null, signOut = false }) {
+  const links = tabs.map(([href, label, key]) => `<a href="${href}"${key === current ? ' aria-current="page"' : ""}>${label}</a>`).join("");
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard: ${esc(title)} | AT Legacy Services</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#F2B544">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body class="owner">
+  <p class="owner-strip"><strong>Owner dashboard</strong> <span>Only you see this</span></p>
+  <header class="owner-head">
+    ${OWNER_BRAND}
+    <nav class="owner-nav" aria-label="Dashboard">${links}${signOut ? '<a href="/admin/logout">Log out</a>' : ""}</nav>
+  </header>
+  <main class="owner-main">
+    ${back ? `<p class="owner-back"><a href="${esc(back.href)}">${esc(back.label)}</a></p>` : ""}
+    <h1>${esc(heading)}</h1>
+    ${intro ? `<p class="owner-intro">${esc(intro)}</p>` : ""}
+${body}
+  </main>
+  <footer class="quote-foot legal">Owner dashboard for AT Legacy Services. &copy; 2026 AT Legacy Group LLC.</footer>
 </body>
 </html>`;
 }
@@ -61,4 +95,4 @@ function formatDate(value) {
   return new Date(value).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" });
 }
 
-module.exports = { esc, page, briefHtml, formatDate };
+module.exports = { esc, page, ownerPage, briefHtml, formatDate };

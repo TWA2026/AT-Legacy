@@ -1,5 +1,5 @@
 const express = require("express");
-const { esc, page, briefHtml, formatDate } = require("../lib/html");
+const { esc, page, ownerPage, briefHtml, formatDate } = require("../lib/html");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
 const {
@@ -17,6 +17,69 @@ const STATUS_LABELS = {
 
 function pill(status) {
   return `<span class="pill pill-${esc(status)}">${esc(STATUS_LABELS[status] || status)}</span>`;
+}
+
+function plural(count, one, many) {
+  return count + " " + (count === 1 ? one : many);
+}
+
+// Phone and email links. Each is built only from digits or an encoded address,
+// so nothing a person typed into a form can change what the link does.
+function dial(phone) {
+  const cleaned = String(phone || "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
+  return cleaned.replace(/\D/g, "").length >= 7 ? cleaned : "";
+}
+
+function textLink(phone, message) {
+  const to = dial(phone);
+  return to ? "sms:" + to + "?&body=" + encodeURIComponent(message) : "";
+}
+
+function emailLink(email, subject, message) {
+  const match = /^([^\s@<>"]+)@([^\s@<>"]+\.[^\s@<>"]+)$/.exec(String(email || "").trim());
+  if (!match) return "";
+  return "mailto:" + encodeURIComponent(match[1]) + "@" + encodeURIComponent(match[2]) +
+    "?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(message);
+}
+
+function firstName(name) {
+  return String(name || "").trim().split(/\s+/)[0] || "";
+}
+
+// What the owner should do next on a request. `quotes` are that request's quotes, each with its company name.
+function nextStep(r, quotes) {
+  if (r.status === "closed") return { needsYou: false, short: "Closed", long: "This request is closed." };
+  if (r.status === "chosen") {
+    const chosen = quotes.find((q) => q.id === r.chosen_quote_id);
+    const company = chosen ? chosen.company : "A company";
+    const hasFee = chosen && Number(chosen.fee_percent) > 0;
+    let rest = "There is no fee on this one. Close the request when the job is done.";
+    if (hasFee) rest = chosen.fee_paid ? "The fee is marked paid. Close the request when you’re done with it." : "When the job is done, enter the final total under Fees.";
+    return { needsYou: false, short: company + " was chosen", long: "The customer chose " + company + ". " + rest };
+  }
+  const unfilled = r.tiers.length - quotes.length;
+  if (unfilled > 0) {
+    if (r.tiers.includes(OWN_CREW_TIER)) {
+      return { needsYou: true, short: "Yours to quote", long: "This one is for your own crew. Assign AT Legacy Services below, then open the quote link and enter your price." };
+    }
+    return {
+      needsYou: true,
+      short: quotes.length ? plural(unfilled, "tier still needs", "tiers still need") + " a company" : "Choose companies",
+      long: "Choose a company for each tier below. Then send each company its link."
+    };
+  }
+  const waiting = quotes.filter((q) => q.status === "invited" || q.status === "visit").length;
+  if (waiting) {
+    return {
+      needsYou: false,
+      short: "Waiting on " + plural(waiting, "quote", "quotes"),
+      long: plural(waiting, "company still owes", "companies still owe") + " a quote. Nothing to do unless one goes quiet. If so, send them their link again."
+    };
+  }
+  if (!quotes.some((q) => q.status === "submitted")) {
+    return { needsYou: true, short: "Every company passed", long: "Every company passed on this job. Remove them and choose others, or close the request." };
+  }
+  return { needsYou: false, short: "Customer is choosing", long: "The quotes are in. The customer picks one on their private page. If they haven’t looked, send them the link." };
 }
 
 function options(values, selected) {
@@ -39,11 +102,32 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   const dashboardHost = hostSignin ? new URL(config.dashboardUrl).hostname : "";
   const WALL_DOWN = "The dashboard is locked. It opens only at its own address, and only while the host\u2019s sign-in wall is on for this service (in Slipway: the service\u2019s Auth setting, Members).";
 
-  const nav = '<nav class="app-nav" aria-label="Dashboard"><a href="/admin">Requests</a><a href="/admin/partners">Partners</a><a href="/admin/fees">Fees</a>' +
-    (hostSignin ? "" : '<a href="/admin/logout">Log out</a>') + "</nav>";
+  const TABS = [["/admin", "Requests", "requests"], ["/admin/partners", "Partners", "partners"], ["/admin/fees", "Fees", "fees"], ["/admin/links", "Links", "links"]];
 
   function adminPage(req, view) {
-    return page({ wide: true, nav, ...view, body: view.body.replace(/__CSRF__/g, esc(csrfToken(secret, req.session))) });
+    return ownerPage({ tabs: TABS, signOut: !hostSignin, ...view, body: view.body.replace(/__CSRF__/g, esc(csrfToken(secret, req.session))) });
+  }
+
+  // A link the owner sends to someone: the address with a Copy button, then ways to send or open it.
+  // `readable` shows the whole address as text. Use it for the short, fixed pages; private links are too long to read.
+  function linkRow({ id, label, link, note = "", textTo = "", emailTo = "", message = "", subject = "AT Legacy Services", who = "", open = "", share = true, readable = false }) {
+    const actions = [];
+    const sms = textLink(textTo, message + " " + link);
+    const mail = emailLink(emailTo, subject, message + "\n\n" + link);
+    if (sms) actions.push(`<li><a href="${esc(sms)}">Text it to ${esc(who || textTo)}</a></li>`);
+    if (mail) actions.push(`<li><a href="${esc(mail)}">Email it to ${esc(who || emailTo)}</a></li>`);
+    if (share) actions.push(`<li hidden><button class="text-button" type="button" data-share-url="${esc(link)}" data-share-text="${esc(message)}">Share it another way</button></li>`);
+    if (open) actions.push(`<li><a href="${esc(link)}" target="_blank" rel="noopener">${esc(open)}</a></li>`);
+    const field = readable
+      ? `<p class="link-name" id="${id}-name">${label}</p>
+        <div class="copy-row copy-readable"><span class="link-address" id="${id}">${esc(link.replace(/^https?:\/\//, "").replace(/\/$/, "")).replace(/\//g, "<wbr>/")}</span><button class="secondary" type="button" data-copy-text="${esc(link)}" aria-describedby="${id}-name">Copy</button></div>`
+      : `<label for="${id}">${label}</label>
+        <div class="copy-row"><input id="${id}" type="text" readonly value="${esc(link)}"><button class="secondary" type="button" data-copy="${id}">Copy</button></div>`;
+    return `<div class="link-row">
+        ${field}
+        ${note ? `<p class="link-note">${note}</p>` : ""}
+        ${actions.length ? `<ul class="link-actions">${actions.join("")}</ul>` : ""}
+      </div>`;
   }
 
   const csrfField = '<input type="hidden" name="csrf" value="__CSRF__">';
@@ -199,32 +283,52 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
 
   router.get("/", async (req, res, next) => {
     try {
-      const requests = await pool.query(
-        `select r.*,
-                (select count(*) from quotes q where q.request_id = r.id) as invited,
-                (select count(*) from quotes q where q.request_id = r.id and q.status = 'submitted') as submitted
-           from requests r
-          order by (r.status = 'closed'), r.created_at desc
-          limit 200`
-      );
-      const applied = await pool.query("select count(*) from partners where status = 'applied'");
-      const rows = requests.rows.map((r) => `<tr>
-            <td><a href="/admin/requests/${r.id}">${esc(r.service)}</a></td>
-            <td>${esc(r.name)}</td>
-            <td>${esc(r.location)}</td>
-            <td>${esc(formatDate(r.created_at))}</td>
-            <td>${r.submitted} of ${r.tiers.length}</td>
-            <td>${pill(r.status)}</td>
-          </tr>`).join("");
-      const waiting = Number(applied.rows[0].count);
+      const requests = (await pool.query(
+        `select * from requests order by (status = 'closed'), created_at desc limit 200`
+      )).rows;
+      const allQuotes = requests.length ? (await pool.query(
+        `select q.id, q.request_id, q.status, q.fee_percent, q.fee_paid, p.company
+           from quotes q join partners p on p.id = q.partner_id
+          where q.request_id = any($1::int[])`, [requests.map((r) => r.id)]
+      )).rows : [];
+      const applied = Number((await pool.query("select count(*) from partners where status = 'applied'")).rows[0].count);
+      const owed = Number((await pool.query(
+        `select coalesce(sum(round(coalesce(q.final_amount_cents, q.amount_cents) * q.fee_percent / 100.0)), 0) as cents
+           from requests r join quotes q on q.id = r.chosen_quote_id
+          where q.fee_percent > 0 and not q.fee_paid`
+      )).rows[0].cents);
+
+      const items = requests.map((r) => {
+        const quotes = allQuotes.filter((q) => q.request_id === r.id);
+        return { r, quotes, step: nextStep(r, quotes) };
+      });
+      // Requests that need the owner come first. Closed ones are already last.
+      items.sort((a, b) => Number(b.step.needsYou) - Number(a.step.needsYou));
+
+      const todo = [];
+      const needy = items.filter((item) => item.step.needsYou);
+      if (needy.length) todo.push(`<li><a href="/admin/requests/${needy[0].r.id}">${plural(needy.length, "request needs", "requests need")} companies</a></li>`);
+      if (applied) todo.push(`<li><a href="/admin/partners">${plural(applied, "partner application", "partner applications")} to review</a></li>`);
+      if (owed > 0) todo.push(`<li><a href="/admin/fees">${esc(formatDollars(owed))} in finder’s fees to collect</a></li>`);
+
+      const rows = items.map(({ r, quotes, step }) => `<li class="owner-row${step.needsYou ? " needs-you" : ""}">
+          <a class="owner-row-main" href="/admin/requests/${r.id}">${esc(r.service)} <span>for ${esc(r.name)}</span></a>
+          <p class="owner-row-facts">${esc(r.location)}<br>Received ${esc(formatDate(r.created_at))}</p>
+          <p class="owner-row-state">${pill(r.status)} <span>${quotes.filter((q) => q.status === "submitted").length} of ${plural(r.tiers.length, "quote", "quotes")} in</span></p>
+          ${r.status === "closed" ? "" : `<p class="owner-row-next">${esc(step.short)}</p>`}
+        </li>`).join("\n");
+
       res.send(adminPage(req, {
+        current: "requests",
         title: "Requests",
         heading: "Requests",
-        body: `    ${waiting ? `<p class="app-alert"><a href="/admin/partners">${waiting} partner application${waiting === 1 ? "" : "s"} to review</a></p>` : ""}
-    ${rows ? `<div class="table-wrap"><table class="app-table">
-        <thead><tr><th>Service</th><th>Customer</th><th>Where</th><th>Received</th><th>Quotes in</th><th>Status</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>` : '<p>No requests yet. They appear here as soon as a customer sends one.</p>'}`
+        body: `    <section class="owner-todo" aria-labelledby="todo-title">
+      <h2 id="todo-title">Needs you</h2>
+      ${todo.length ? `<ul>${todo.join("")}</ul>` : "<p>Nothing right now.</p>"}
+    </section>
+    ${rows ? `<ul class="owner-list">
+${rows}
+    </ul>` : `<p class="owner-empty">No requests yet. They appear here as soon as a customer sends one. Your request form is on the <a href="/admin/links">Links</a> tab.</p>`}`
       }));
     } catch (error) {
       next(error);
@@ -237,12 +341,14 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       if (!found.rows.length) return next();
       const r = found.rows[0];
       const quotes = (await pool.query(
-        "select q.*, p.company from quotes q join partners p on p.id = q.partner_id where q.request_id = $1", [r.id]
+        `select q.*, p.company, p.contact_name, p.phone as partner_phone, p.email as partner_email
+           from quotes q join partners p on p.id = q.partner_id where q.request_id = $1`, [r.id]
       )).rows;
       const partners = (await pool.query(
         "select id, company, trade, tier from partners where status = 'verified' order by (trade = $1) desc, company", [r.service]
       )).rows;
       const open = r.status !== "chosen" && r.status !== "closed";
+      const step = nextStep(r, quotes);
 
       const tiers = r.tiers.map((tier) => {
         const quote = quotes.find((item) => item.tier === tier);
@@ -267,19 +373,34 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
           <p>${pill(quote.status)}${chosen ? " " + pill("chosen") : ""}</p>
           ${quote.status === "submitted" ? `<p class="quote-price">${esc(formatDollars(quote.amount_cents))}</p>
           <dl class="quote-facts"><dt>Included</dt><dd>${esc(quote.includes)}</dd><dt>Timeline</dt><dd>${esc(quote.timeline)}</dd>${quote.warranty ? `<dt>Warranty</dt><dd>${esc(quote.warranty)}</dd>` : ""}</dl>` : ""}
-          <label for="link-${quote.id}">Partner&rsquo;s quote link</label>
-          <div class="copy-row"><input id="link-${quote.id}" type="text" readonly value="${esc(link)}"><button class="secondary" type="button" data-copy="link-${quote.id}">Copy</button></div>
+          ${linkRow({
+            id: "link-" + quote.id,
+            label: "Partner&rsquo;s quote link",
+            link,
+            textTo: quote.partner_phone,
+            emailTo: quote.partner_email,
+            who: firstName(quote.contact_name),
+            subject: r.service + " job to quote",
+            message: "AT Legacy Services has a " + r.service.toLowerCase() + " job for you to quote in " + r.location + ". The details and your quote form are here:",
+            open: "Open the company’s page"
+          })}
           ${open && quote.status !== "submitted" ? `<form method="post" action="/admin/requests/${r.id}/uninvite">${csrfField}<input type="hidden" name="quote" value="${quote.id}"><button class="text-button" type="submit">Remove this company</button></form>` : ""}
         </li>`;
       }).join("\n");
 
       const customerLink = siteUrl(req) + "/r/" + r.token;
+      const callTo = dial(r.phone);
+      const mailTo = emailLink(r.email, "Your " + r.service.toLowerCase() + " request", "");
       res.send(adminPage(req, {
+        current: "requests",
+        back: { href: "/admin", label: "Back to all requests" },
         title: r.service + " request",
         heading: r.service + " for " + r.name,
         intro: "Received " + formatDate(r.created_at) + ". " + (STATUS_LABELS[r.status] || r.status) + ".",
-        body: `    <section class="app-section">
+        body: `    <p class="owner-next${step.needsYou ? " needs-you" : ""}"><strong>Next:</strong> ${esc(step.long)}</p>
+    <section class="app-section">
       <h2>Quotes</h2>
+      <p class="form-note">Each company gets its own link. Its page shows the job brief and a form for their price. It never shows the customer&rsquo;s name or number.</p>
       <ul class="quote-cards">
 ${tiers}
       </ul>
@@ -288,12 +409,22 @@ ${tiers}
       <h2>Customer</h2>
       <dl class="brief">
         <dt>Name</dt><dd>${esc(r.name)}</dd>
-        <dt>Phone</dt><dd>${esc(r.phone)}</dd>
-        ${r.email ? `<dt>Email</dt><dd>${esc(r.email)}</dd>` : ""}
+        <dt>Phone</dt><dd>${esc(r.phone)}${callTo ? ` <span class="contact-links"><a href="tel:${esc(callTo)}">Call</a> <a href="${esc(textLink(r.phone, ""))}">Text</a></span>` : ""}</dd>
+        ${r.email ? `<dt>Email</dt><dd>${esc(r.email)}${mailTo ? ` <span class="contact-links"><a href="${esc(mailTo)}">Email</a></span>` : ""}</dd>` : ""}
         <dt>Prefers</dt><dd>${esc(r.contact_method)}</dd>
       </dl>
-      <label for="customer-link">Customer&rsquo;s private page</label>
-      <div class="copy-row"><input id="customer-link" type="text" readonly value="${esc(customerLink)}"><button class="secondary" type="button" data-copy="customer-link">Copy</button></div>
+      ${linkRow({
+        id: "customer-link",
+        label: "Customer&rsquo;s private page",
+        link: customerLink,
+        note: "This is the page the customer sees. Their quotes appear on it side by side, and they choose one there.",
+        textTo: r.phone,
+        emailTo: r.email,
+        who: firstName(r.name),
+        subject: "Your " + r.service.toLowerCase() + " quotes",
+        message: "Hi " + firstName(r.name) + ", this is AT Legacy Services. Your " + r.service.toLowerCase() + " quotes show up on your private page:",
+        open: "Open the customer’s page"
+      })}
     </section>
     <section class="app-section">
       <h2>Job brief</h2>
@@ -365,27 +496,43 @@ ${tiers}
   router.get("/partners", async (req, res, next) => {
     try {
       const partners = (await pool.query("select * from partners order by (status = 'applied') desc, (status = 'paused'), company")).rows;
-      const rows = partners.map((p) => `<tr>
-            <td><a href="/admin/partners/${p.id}">${esc(p.company)}</a></td>
-            <td>${esc(p.trade)}</td>
-            <td>${esc(p.tier)}</td>
-            <td>${esc(p.contact_name)}<br>${esc(p.phone)}</td>
-            <td>${pill(p.status)}</td>
-          </tr>`).join("");
+      const rows = partners.map((p) => {
+        const callTo = dial(p.phone);
+        return `<li class="owner-row${p.status === "applied" ? " needs-you" : ""}">
+          <a class="owner-row-main" href="/admin/partners/${p.id}">${esc(p.company)}</a>
+          <p class="owner-row-facts">${esc(p.trade)}<br>${esc(p.tier)}</p>
+          <p class="owner-row-facts">${esc(p.contact_name)}${callTo ? `<br><a href="tel:${esc(callTo)}">${esc(p.phone)}</a>` : (p.phone ? "<br>" + esc(p.phone) : "")}</p>
+          <p class="owner-row-state">${pill(p.status)}</p>
+          ${p.status === "applied" ? '<p class="owner-row-next">Review their application</p>' : ""}
+        </li>`;
+      }).join("\n");
       res.send(adminPage(req, {
+        current: "partners",
         title: "Partners",
         heading: "Partners",
-        intro: "Only verified partners can be sent a job brief.",
-        body: `    <p><a class="primary" href="/admin/partners/new">Add a partner</a></p>
-    <div class="table-wrap"><table class="app-table">
-        <thead><tr><th>Company</th><th>Service</th><th>Tier</th><th>Contact</th><th>Status</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>`
+        intro: "The companies you send jobs to. Only a verified partner can be sent a job brief.",
+        body: `    <p class="owner-actions"><a class="primary" href="/admin/partners/new">Add a partner</a></p>
+    <ul class="owner-list">
+${rows}
+    </ul>
+    <section class="app-section owner-after">
+      <h2>Bring on a company</h2>
+      ${linkRow({
+        id: "signup-link", readable: true,
+        label: "Company sign-up page",
+        link: siteUrl(req) + "/partners",
+        note: "Send this to a company you want as a partner. Their application shows up in the list above as Applied.",
+        message: "AT Legacy Services sends local homeowners’ jobs to companies like yours. No lead fees. Apply here:",
+        open: "Open the sign-up page"
+      })}
+    </section>`
       }));
     } catch (error) {
       next(error);
     }
   });
+
+  const PARTNER_PAGE = { current: "partners", back: { href: "/admin/partners", label: "Back to all partners" } };
 
   function partnerForm(p, action, error) {
     const ownCrew = p.trade === OWN_CREW_SERVICE;
@@ -460,14 +607,14 @@ ${tiers}
   }
 
   router.get("/partners/new", (req, res) => {
-    res.send(adminPage(req, { title: "Add a partner", heading: "Add a partner", body: partnerForm({ trade: SERVICE_NAMES[0], tier: TIERS[0], status: "applied" }, "/admin/partners") }));
+    res.send(adminPage(req, { ...PARTNER_PAGE, title: "Add a partner", heading: "Add a partner", body: partnerForm({ trade: SERVICE_NAMES[0], tier: TIERS[0], status: "applied" }, "/admin/partners") }));
   });
 
   router.post("/partners", async (req, res, next) => {
     try {
       const p = readPartner(req.body);
       const problem = partnerProblem(p);
-      if (problem) return res.status(400).send(adminPage(req, { title: "Add a partner", heading: "Add a partner", body: partnerForm(p, "/admin/partners", problem) }));
+      if (problem) return res.status(400).send(adminPage(req, { ...PARTNER_PAGE, title: "Add a partner", heading: "Add a partner", body: partnerForm(p, "/admin/partners", problem) }));
       await pool.query(
         `insert into partners (company, contact_name, phone, email, trade, tier, years, license_no, areas, website, status,
                                check_registration, check_license, check_insurance, check_references, notes)
@@ -485,7 +632,7 @@ ${tiers}
     try {
       const p = (await pool.query("select * from partners where id = $1", [Number(req.params.id) || 0])).rows[0];
       if (!p) return next();
-      res.send(adminPage(req, { title: p.company, heading: p.company, intro: "Applied " + formatDate(p.created_at) + ".", body: partnerForm(p, "/admin/partners/" + p.id) }));
+      res.send(adminPage(req, { ...PARTNER_PAGE, title: p.company, heading: p.company, intro: "Added " + formatDate(p.created_at) + ". " + STATUS_LABELS[p.status] + ".", body: partnerForm(p, "/admin/partners/" + p.id) }));
     } catch (error) {
       next(error);
     }
@@ -499,7 +646,7 @@ ${tiers}
       const p = readPartner(req.body);
       const problem = partnerProblem(p);
       if (problem) {
-        return res.status(400).send(adminPage(req, { title: existing.company, heading: existing.company, body: partnerForm({ ...existing, ...p }, "/admin/partners/" + id, problem) }));
+        return res.status(400).send(adminPage(req, { ...PARTNER_PAGE, title: existing.company, heading: existing.company, body: partnerForm({ ...existing, ...p }, "/admin/partners/" + id, problem) }));
       }
       await pool.query(
         `update partners set company = $1, contact_name = $2, phone = $3, email = $4, trade = $5, tier = $6, years = $7,
@@ -532,34 +679,63 @@ ${tiers}
         const total = Number(job.final_amount_cents || job.amount_cents);
         const fee = Math.round(total * Number(job.fee_percent) / 100);
         if (job.fee_paid) paid += fee; else owed += fee;
-        return `<tr>
-            <td><a href="/admin/requests/${job.r_id}">${esc(job.service)}</a><br>${esc(job.customer_name)}</td>
-            <td>${esc(job.company)}</td>
-            <td>${esc(formatDollars(job.amount_cents))}</td>
-            <td>${esc(Number(job.fee_percent))}%</td>
-            <td><strong>${esc(formatDollars(fee))}</strong></td>
-            <td><form method="post" action="/admin/fees/${job.id}" class="fee-form">
+        return `<li class="owner-row fee-row${job.fee_paid ? "" : " needs-you"}">
+            <a class="owner-row-main" href="/admin/requests/${job.r_id}">${esc(job.service)} <span>for ${esc(job.customer_name)}</span></a>
+            <p class="owner-row-facts">${esc(job.company)}<br>Quoted ${esc(formatDollars(job.amount_cents))} at ${esc(Number(job.fee_percent))}%</p>
+            <p class="owner-row-state"><strong class="fee-amount">${esc(formatDollars(fee))}</strong> <span>${job.fee_paid ? "Paid" : "Owed to you"}</span></p>
+            <form method="post" action="/admin/fees/${job.id}" class="fee-form">
               ${csrfField}
               <label for="final-${job.id}">Final job total</label>
               <input id="final-${job.id}" name="final" type="text" inputmode="decimal" maxlength="14" value="${esc(formatDollars(job.final_amount_cents))}" placeholder="${esc(formatDollars(job.amount_cents))}">
               <label class="choice"><input type="checkbox" name="paid"${job.fee_paid ? " checked" : ""}> <span>Fee paid</span></label>
               <button class="secondary" type="submit">Save</button>
-            </form></td>
-          </tr>`;
-      }).join("");
+            </form>
+          </li>`;
+      }).join("\n");
       res.send(adminPage(req, {
+        current: "fees",
         title: "Fees",
         heading: "Finder’s fees",
         intro: "Owed to you now: " + formatDollars(owed) + ". Collected so far: " + formatDollars(paid) + ".",
-        body: `    <p class="form-note">The fee uses the final job total when you enter one, and the quoted price until then.</p>
-    ${rows ? `<div class="table-wrap"><table class="app-table">
-        <thead><tr><th>Job</th><th>Partner</th><th>Quoted</th><th>Rate</th><th>Fee</th><th>Update</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>` : "<p>No jobs have been awarded yet.</p>"}`
+        body: `    <p class="form-note owner-lead">One row for each job a customer awarded. The fee uses the final job total when you enter one, and the quoted price until then.</p>
+    ${rows ? `<ul class="owner-list">
+${rows}
+    </ul>` : '<p class="owner-empty">No jobs have been awarded yet. A job shows up here when a customer chooses a company.</p>'}`
       }));
     } catch (error) {
       next(error);
     }
+  });
+
+  // Links: every page of the site and who it is for.
+  router.get("/links", (req, res) => {
+    const site = siteUrl(req);
+    res.send(adminPage(req, {
+      current: "links",
+      title: "Links",
+      heading: "Links",
+      intro: "Every page of the site, and who each one is for.",
+      body: `    <section class="app-section">
+      <h2>Yours</h2>
+      ${linkRow({ id: "link-dashboard", readable: true, label: "This dashboard", link: site + "/admin", note: "Private. It opens only after you sign in. Every dashboard page has the gold bar at the top.", share: false })}
+    </section>
+    <section class="app-section">
+      <h2>For customers</h2>
+      ${linkRow({ id: "link-quote", readable: true, label: "Request form", link: site + "/quote", note: "Send or post this one. A customer describes the job once and picks the tiers they want. Their request then shows up under Requests.", message: "Get up to three quotes from verified local companies with one request:", open: "Open the request form" })}
+      ${linkRow({ id: "link-home", readable: true, label: "Home page", link: site + "/", note: "Explains how it works, the three tiers, and the services.", message: "AT Legacy Services: one request, three quotes from verified local companies.", open: "Open the home page" })}
+    </section>
+    <section class="app-section">
+      <h2>For companies</h2>
+      ${linkRow({ id: "link-partners", readable: true, label: "Company sign-up page", link: site + "/partners", note: "Send this to a company you want as a partner. Their application then shows up under Partners.", message: "AT Legacy Services sends local homeowners’ jobs to companies like yours. No lead fees. Apply here:", open: "Open the sign-up page" })}
+    </section>
+    <section class="app-section">
+      <h2>Made for each job</h2>
+      <dl class="brief">
+        <dt>Customer&rsquo;s private page</dt><dd>One per request. The customer sees their quotes there and chooses. Find the link on the request, under Customer.</dd>
+        <dt>Company&rsquo;s quote page</dt><dd>One per company on each request. The company reads the brief and enters a price. Find the link on the request, under Quotes.</dd>
+      </dl>
+    </section>`
+    }));
   });
 
   router.post("/fees/:id", async (req, res, next) => {
@@ -567,7 +743,7 @@ ${tiers}
       const final = String(req.body.final || "").trim();
       const cents = final ? dollarsToCents(final) : null;
       if (final && !cents) {
-        return res.status(400).send(adminPage(req, { title: "Fees", heading: "That amount didn’t work", body: '    <p>Enter the final job total as a dollar amount, like 5200 or 5,200.00. <a href="/admin/fees">Back to fees</a></p>' }));
+        return res.status(400).send(adminPage(req, { current: "fees", back: { href: "/admin/fees", label: "Back to fees" }, title: "Fees", heading: "That amount didn’t work", body: '    <p>Enter the final job total as a dollar amount, like 5200 or 5,200.00.</p>' }));
       }
       await pool.query("update quotes set final_amount_cents = $1, fee_paid = $2 where id = $3", [cents, Boolean(req.body.paid), Number(req.params.id) || 0]);
       res.redirect(303, "/admin/fees");

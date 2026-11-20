@@ -1441,26 +1441,6 @@ html {
 }
 
 /* Request pages, partner quote pages, and the dashboard */
-.app-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 26px;
-  margin-top: 4px;
-}
-
-.app-nav a {
-  color: var(--glass);
-}
-
-.app-nav a:hover {
-  color: var(--white);
-}
-
-.app-nav a:focus-visible {
-  outline: 3px solid var(--glass);
-  outline-offset: 3px;
-}
-
 .app-section {
   display: grid;
   gap: 16px;
@@ -1599,40 +1579,6 @@ html {
   color: var(--slate);
 }
 
-.table-wrap {
-  max-width: 1100px;
-  overflow-x: auto;
-  border: 1px solid rgba(19, 40, 58, 0.3);
-  border-radius: 8px;
-  background: var(--white);
-}
-
-.app-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.app-table th,
-.app-table td {
-  padding: 12px 14px;
-  border-bottom: 1px solid rgba(19, 40, 58, 0.18);
-  text-align: left;
-  vertical-align: top;
-}
-
-.app-table th {
-  color: var(--slate);
-  font-size: 0.95rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.app-table tr:last-child td {
-  border-bottom: 0;
-}
-
-.app-table a,
-.app-alert a,
 .quote-wait a {
   color: var(--navy);
   font-weight: 600;
@@ -1640,14 +1586,6 @@ html {
   text-decoration-color: var(--gold);
   text-decoration-thickness: 3px;
   text-underline-offset: 0.2em;
-}
-
-.app-alert {
-  max-width: 1100px;
-  margin: 0 0 24px;
-  padding: 12px 14px;
-  border-left: 4px solid var(--gold);
-  background: var(--white);
 }
 
 .copy-row {
@@ -1679,7 +1617,6 @@ html {
 .copy-row input:focus-visible,
 .stack select:focus-visible,
 .fee-form input:focus-visible,
-.app-table a:focus-visible,
 .choice input:focus-visible {
   outline: 3px solid var(--bay);
   outline-offset: 2px;
@@ -1757,4 +1694,371 @@ html {
 
 .quote-form > .primary {
   justify-self: start;
+}
+
+/* The owner's dashboard. Its own frame: a gold strip, a compact bar, and tabs,
+   so it is never mistaken for a page that customers or companies see. */
+.owner {
+  background: var(--shell);
+}
+
+.owner-strip {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 18px;
+  margin: 0;
+  padding: 7px var(--gutter);
+  background: var(--gold);
+  color: var(--navy);
+  font-size: 0.95rem;
+}
+
+.owner-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 4px 32px;
+  padding: 14px var(--gutter) 0;
+  background: var(--navy);
+  color: var(--shell);
+}
+
+.owner-head .brand {
+  gap: 10px;
+  padding-bottom: 12px;
+  color: inherit;
+}
+
+.owner-head .brand img {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1.5px var(--glass);
+}
+
+.owner-head .brand-name {
+  font-size: 1.1rem;
+}
+
+.owner-head .brand-sub {
+  font-size: 0.56rem;
+}
+
+.owner-head .brand:focus-visible,
+.owner-nav a:focus-visible {
+  outline: 3px solid var(--glass);
+  outline-offset: 3px;
+}
+
+.owner-nav {
+  display: flex;
+  gap: 0 24px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.owner-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 46px;
+  border-bottom: 5px solid transparent;
+  color: var(--glass);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.owner-nav a:hover {
+  color: var(--white);
+}
+
+.owner-nav a[aria-current="page"] {
+  border-bottom-color: var(--gold);
+  color: var(--white);
+}
+
+.owner-main {
+  padding: clamp(22px, 4vh, 40px) var(--gutter) clamp(44px, 8vh, 80px);
+  color: var(--navy);
+}
+
+.owner-main h1 {
+  max-width: 20em;
+  margin: 0 0 16px;
+  font-family: var(--slab);
+  font-size: clamp(1.9rem, 6.6vw, 2.8rem);
+  font-weight: 400;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.owner-intro {
+  max-width: 40em;
+  margin: -8px 0 22px;
+  color: var(--slate);
+}
+
+.owner-back {
+  margin: 0 0 14px;
+}
+
+.owner-lead,
+.owner-actions {
+  margin: 0 0 20px;
+}
+
+.owner-main a:not(.primary):not(.secondary) {
+  color: var(--navy);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 0.2em;
+}
+
+.owner-main a:focus-visible,
+.owner-main .text-button:focus-visible {
+  outline: 3px solid var(--bay);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* What needs the owner, and the next step on one request */
+.owner-todo,
+.owner-next {
+  max-width: 760px;
+  margin: 0 0 26px;
+  padding: 14px 16px;
+  border-left: 6px solid var(--slate);
+  background: var(--white);
+}
+
+.owner-next.needs-you,
+.owner-todo:has(ul) {
+  border-left-color: var(--gold);
+}
+
+.owner-todo h2 {
+  margin: 0 0 6px;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.owner-todo ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.owner-todo p {
+  margin: 0;
+  color: var(--slate);
+}
+
+/* Lists of requests, partners, and fees: one bordered ledger, a row each */
+.owner-list {
+  max-width: 1100px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(19, 40, 58, 0.3);
+  border-radius: 8px;
+  background: var(--white);
+  list-style: none;
+}
+
+.owner-row {
+  display: grid;
+  gap: 6px 24px;
+  padding: 16px 16px 16px 14px;
+  border-bottom: 1px solid rgba(19, 40, 58, 0.18);
+  border-left: 6px solid transparent;
+}
+
+.owner-row:first-child {
+  border-top-left-radius: 7px;
+}
+
+.owner-row:last-child {
+  border-bottom: 0;
+  border-bottom-left-radius: 7px;
+}
+
+.owner-row.needs-you {
+  border-left-color: var(--gold);
+}
+
+.owner-row p {
+  margin: 0;
+}
+
+.owner-main a.owner-row-main {
+  font-size: 1.2rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.owner-row-main span {
+  font-weight: 600;
+}
+
+.owner-row-facts {
+  color: var(--slate);
+  font-size: 1rem;
+}
+
+.owner-row-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  font-size: 1rem;
+}
+
+.owner-row-next {
+  font-weight: 600;
+}
+
+.owner-row.needs-you .owner-row-next {
+  font-weight: 800;
+}
+
+.owner-empty {
+  max-width: 40em;
+  margin: 0;
+}
+
+.owner-after {
+  margin: 44px 0 0;
+}
+
+.owner-main .app-section > h2 {
+  font-size: clamp(1.5rem, 4.6vw, 2rem);
+}
+
+.owner-main .app-section:last-child {
+  margin-bottom: 0;
+}
+
+/* A link the owner sends: the address, a Copy button, and ways to send or open it */
+.link-row {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 760px;
+}
+
+.link-row > label,
+.link-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.copy-readable {
+  align-items: flex-start;
+}
+
+.link-address {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--slate);
+  border-radius: 6px;
+  background: var(--white);
+  font-weight: 600;
+  overflow-wrap: break-word;
+}
+
+.link-note {
+  margin: 0;
+  color: var(--slate);
+  font-size: 1rem;
+}
+
+.link-actions {
+  display: grid;
+  gap: 12px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.link-actions .text-button {
+  font-weight: 600;
+  text-decoration-thickness: 3px;
+}
+
+.app-section .link-row + .link-row {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(19, 40, 58, 0.18);
+}
+
+.contact-links {
+  display: inline-flex;
+  gap: 16px;
+  margin-left: 12px;
+  white-space: nowrap;
+}
+
+.fee-amount {
+  font-family: var(--slab);
+  font-size: 1.6rem;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.fee-row .fee-form {
+  max-width: 320px;
+  margin-top: 6px;
+}
+
+@media (min-width: 720px) {
+  .link-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+  }
+
+  .owner-row {
+    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.1fr);
+    align-items: start;
+    padding: 18px 20px 18px 16px;
+  }
+
+  .owner-row-main,
+  .owner-row-next {
+    grid-column: 1;
+  }
+
+  .owner-row-facts {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .owner-row-state {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+
+  .owner-row-facts + .owner-row-facts {
+    grid-column: 3;
+  }
+
+  .owner-row-facts + .owner-row-facts + .owner-row-state {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .fee-row .fee-form {
+    grid-column: 2 / span 2;
+    grid-row: auto;
+    grid-template-columns: auto minmax(0, 150px) auto auto;
+    align-items: center;
+    max-width: none;
+    gap: 10px 14px;
+  }
 }

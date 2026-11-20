@@ -15,6 +15,19 @@ One Node app serves the public site, the request API, the private customer and p
 
 Repairs and upkeep go to the in-house "AT Legacy Services" partner record as a single quote with no fee.
 
+## The dashboard
+
+Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "Owner dashboard" strip, a compact bar, and four tabs. Pages for customers and companies use `page()` and never show the strip, so the owner can tell at a glance which pages are theirs.
+
+| Tab | What it shows |
+| --- | --- |
+| Requests | What needs the owner, then every request with its next step. Requests that need a company come first |
+| Partners | Companies and their status, applications to review, and the sign-up link to send to a new company |
+| Fees | One row per awarded job: the fee, the final total, and whether it's paid |
+| Links | Every fixed page of the site with its address, and who each one is for |
+
+On a request, each private link has a Copy button plus one-tap ways to send it: text, email, the phone's share sheet, or open it to see what the other person sees. The text and email links are built only from digits and an encoded address (`textLink` and `emailLink` in `server/routes/admin.js`), so nothing typed into a form can change where they go.
+
 ## Rules the code enforces
 
 - A partner can be sent a brief only when their status is Verified.

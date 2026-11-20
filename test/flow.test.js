@@ -597,6 +597,121 @@ test("full flow: request, invites, quotes, choice, and fee", async () => {
   assert.equal((await pool.query("select status from requests where id = $1", [row.id])).rows[0].status, "collecting");
 });
 
+test("the dashboard is marked as the owner's, says what needs them, and builds safe send links", async () => {
+  await pool.query("delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
+  const site = await start();
+  const admin = await login(site);
+  const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
+
+  // Every dashboard page carries the owner strip and marks its tab. Pages for other people never do.
+  for (const [path, tab] of [["/admin", "Requests"], ["/admin/partners", "Partners"], ["/admin/partners/new", "Partners"], ["/admin/fees", "Fees"], ["/admin/links", "Links"]]) {
+    const html = await see(path);
+    assert.match(html, /class="owner-strip"><strong>Owner dashboard<\/strong>/, path);
+    assert.match(html, new RegExp('aria-current="page">' + tab + "<"), path);
+    assert.match(html, /<title>Dashboard: /, path);
+  }
+  assert.match(await see("/admin"), /Nothing right now\./);
+  assert.match(await see("/admin"), /No requests yet\./);
+
+  // People type anything into phone and email fields.
+  const application = {
+    company: "Budget <i>Fence</i>", trade: "Fence", tier: "Affordable", years: "6", license: "", insured: "Yes, I can send proof",
+    areas: "Land O' Lakes", website: "", name: "Pat O'Partner", phone: '813-555-0199"><script>', email: "pat@example.test?cc=x&body=hi"
+  };
+  assert.equal((await site.json("/api/partners", application)).status, 201);
+  const partner = (await pool.query("select * from partners where trade = 'Fence'")).rows[0];
+  let home = await see("/admin");
+  assert.match(home, /<a href="\/admin\/partners">1 partner application to review<\/a>/);
+  let partnersPage = await see("/admin/partners");
+  assert.match(partnersPage, /class="owner-row needs-you"/);
+  assert.match(partnersPage, /Review their application/);
+  assert.match(partnersPage, /<a href="tel:8135550199">813-555-0199&quot;&gt;&lt;script&gt;<\/a>/);
+  assert.doesNotMatch(partnersPage, /<script>|<i>Fence/);
+  const verify = await site.form("/admin/partners/" + partner.id, {
+    csrf: admin.csrf, company: partner.company, contact_name: partner.contact_name, phone: partner.phone, email: partner.email,
+    trade: "Fence", tier: "Affordable", status: "verified",
+    check_registration: "on", check_license: "on", check_insurance: "on", check_references: "on"
+  }, { cookie: admin.cookie });
+  assert.equal(verify.status, 303);
+
+  const { url, row } = await createRequest(site, { name: 'Dana <b>Customer</b>', phone: "(813) 555-0100 <x>", email: "dana+quotes@example.test", contact: "Email" });
+  for (const path of ["/", "/quote", "/partners", url]) {
+    assert.doesNotMatch(await (await site.get(path)).text(), /owner-strip|Owner dashboard/, path);
+  }
+
+  // A new request needs companies.
+  home = await see("/admin");
+  assert.match(home, new RegExp('<a href="/admin/requests/' + row.id + '">1 request needs companies</a>'));
+  assert.match(home, /class="owner-row needs-you"/);
+  assert.match(home, /Choose companies/);
+  assert.match(home, /0 of 2 quotes in/);
+  assert.match(home, /Fence <span>for Dana &lt;b&gt;Customer&lt;\/b&gt;<\/span>/);
+  let detail = await see("/admin/requests/" + row.id);
+  assert.match(detail, /<strong>Next:<\/strong> Choose a company for each tier below\./);
+  assert.match(detail, /Back to all requests/);
+
+  // With one tier filled, the company's link can be texted or emailed in one tap.
+  const invite = (tier) => site.form("/admin/requests/" + row.id + "/invite", { csrf: admin.csrf, partner: String(partner.id), tier }, { cookie: admin.cookie });
+  await invite("Affordable");
+  const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
+  home = await see("/admin");
+  assert.match(home, /1 tier still needs a company/);
+  detail = await see("/admin/requests/" + row.id);
+  const link = "https://example.test/q/" + quote.token;
+  const said = "AT Legacy Services has a fence job for you to quote in 34637. The details and your quote form are here:";
+  assert.ok(detail.includes('href="sms:8135550199?&amp;body=' + encodeURIComponent(said + " " + link) + '">Text it to Pat</a>'));
+  // The typed email can't add recipients or text of its own: everything after the @ stays part of the address.
+  assert.ok(detail.includes('href="mailto:pat@example.test%3Fcc%3Dx%26body%3Dhi?subject=' + encodeURIComponent("Fence job to quote") + "&amp;body=" + encodeURIComponent(said + "\n\n" + link) + '">Email it to Pat</a>'));
+  assert.ok(detail.includes('<a href="' + link + '" target="_blank" rel="noopener">Open the company’s page</a>'));
+  assert.ok(detail.includes('data-share-url="' + link + '"'));
+  // The customer: call, text, email, and their private page.
+  assert.match(detail, /<a href="tel:8135550100">Call<\/a> <a href="sms:8135550100\?&amp;body=">Text<\/a>/);
+  assert.match(detail, /href="mailto:dana%2Bquotes@example\.test\?subject=/);
+  assert.ok(detail.includes("Text it to Dana</a>"));
+  assert.ok(detail.includes('<a href="https://example.test' + url + '" target="_blank" rel="noopener">Open the customer’s page</a>'));
+  assert.match(detail, /This is the page the customer sees\./);
+  assert.doesNotMatch(detail, /<b>Customer|<script>|0100 <x>/);
+
+  // Every tier filled: nothing to do until the companies answer.
+  await invite("Premium");
+  home = await see("/admin");
+  assert.match(home, /Waiting on 2 quotes/);
+  assert.match(home, /Nothing right now\./);
+  assert.doesNotMatch(home, /owner-row needs-you/);
+  const quotes = (await pool.query("select * from quotes where request_id = $1 order by tier", [row.id])).rows;
+
+  // Everyone passes: the owner is needed again. One price in: the customer is choosing.
+  for (const q of quotes) await site.form("/q/" + q.token, { action: "decline" });
+  home = await see("/admin");
+  assert.match(home, /Every company passed/);
+  assert.match(home, /1 request needs companies/);
+  await pool.query("update quotes set status = 'submitted', amount_cents = 495000, includes = 'All of it', timeline = '2 weeks' where id = $1", [quotes[0].id]);
+  home = await see("/admin");
+  assert.match(home, /Customer is choosing/);
+  assert.match(home, /1 of 2 quotes in/);
+
+  // Chosen: the fee shows up as money to collect. Closed: nothing more to say.
+  await site.form(url + "/choose", { quote: String(quotes[0].id) });
+  home = await see("/admin");
+  assert.match(home, /Budget &lt;i&gt;Fence&lt;\/i&gt; was chosen/);
+  assert.match(home, /<a href="\/admin\/fees">\$247\.50 in finder’s fees to collect<\/a>/);
+  detail = await see("/admin/requests/" + row.id);
+  assert.match(detail, /When the job is done, enter the final total under Fees\./);
+  const fees = await see("/admin/fees");
+  assert.match(fees, /class="owner-row fee-row needs-you"/);
+  assert.match(fees, /Owed to you/);
+  await site.form("/admin/fees/" + quotes[0].id, { csrf: admin.csrf, final: "", paid: "on" }, { cookie: admin.cookie });
+  assert.doesNotMatch(await see("/admin"), /fees to collect/);
+
+  // The Links page lists every fixed page with its full address.
+  const links = await see("/admin/links");
+  for (const address of ["https://example.test/admin", "https://example.test/quote", "https://example.test/", "https://example.test/partners"]) {
+    assert.ok(links.includes('data-copy-text="' + address + '"'), address);
+  }
+  assert.match(links, /example\.test<wbr>\/quote/);
+  assert.match(partnersPage = await see("/admin/partners"), /data-copy-text="https:\/\/example\.test\/partners"/);
+});
+
 test("repairs go to our own crew with no fee", async () => {
   const site = await start();
   const admin = await login(site);
