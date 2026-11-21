@@ -24,6 +24,7 @@ Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "O
 | Requests | What needs the owner, then every request with its next step. Requests that need a company come first |
 | Partners | The approved vendor list, the companies working toward it, the standard, and the sign-up link to send to a new company |
 | Fees | One row per awarded job: the fee, the final total, and whether it's paid |
+| Messages | What people send from the Contact page, newest first, with a tap to call or email back |
 | Links | Every fixed page of the site with its address, and who each one is for |
 
 On a request, each private link has a Copy button plus one-tap ways to send it: text, email, the phone's share sheet, or open it to see what the other person sees. The text and email links are built only from digits and an encoded address (`textLink` and `emailLink` in `server/routes/admin.js`), so nothing typed into a form can change where they go.
@@ -81,6 +82,31 @@ An approved company has a certificate number, such as AV-1004, and a printable c
 
 A later visit that meets the standard renews the approval and sets the tier again. Pausing a company takes it off the list and keeps its dates. Moving it back to Applied withdraws the certification.
 
+### Business details: one file
+
+`business.json` holds the phone number, the owner's name and role, the About paragraphs, the hours, the reply-time promise, and the email address. Every public page reads from it, both on the hub and in the static build. A detail left empty takes its sentence or section off the page, so nothing shows half filled.
+
+| Field | Shows up |
+| --- | --- |
+| `phone` | Home page footer, Contact, the "this form needs JavaScript" notes, and the business listing data search engines read. Needs 10 digits |
+| `owner`, `ownerRole`, `about` | The "Who runs it" part of the About page. `about` is a list of paragraphs |
+| `hours`, `reply` | Contact page |
+| `email`, `emailReady` | Contact page and the listing data. The address stays hidden until `emailReady` is `true`. Set it only once mail to that address arrives |
+
+In a page, `<!--if:phone-->…<!--/if:phone-->` keeps its contents only when the detail is filled, `<!--if:!phone-->` only when it is empty, and `{{phone}}` prints it (`server/lib/business.js`).
+
+### What a customer sees on a quote
+
+- **Line by line.** A company's quote form asks for the price, what it includes, what it doesn't, the timeline, the earliest start, payment terms, the permit, and the warranty. Every quote lists them in that order.
+- **Company record.** Under each quote: the approved vendor number and date, the date of the passing site visit, each paperwork check the owner ticked, and the points items the company showed at that visit. A license number shows only when the license check is ticked. Nothing in the record is the company's own claim.
+- **Side by side.** With two or more quotes in, a wide screen and a printout show one table with a column per company. A phone shows the cards. "Print or save as a PDF" prints the table without buttons.
+- **Keep this page.** Until a company is chosen, the page offers to copy, text, or email its own link, because the link is the only way back.
+- **A rating after the job.** Once a company is chosen, the page asks for 1 to 5 stars, whether they'd hire the company again, and a comment. One rating per request. It lands in Partners, Customer ratings. A rating shows on the home page only when the customer ticked that it may and the owner turns it on, and then with a first name only.
+
+### Pages customers can read
+
+`/about`, `/standard`, `/contact`, `/privacy`, and `/terms`. The standard page lists the items from the dashboard's standard in the owner's wording; points and the numbers each tier needs stay private. The request form says so when a service has no approved company in a tier yet (`/api/coverage`). **The privacy and terms pages are plain-language drafts. Have an attorney read them before relying on them.** The privacy page promises deletion on request: a request's page in the dashboard has "Delete this request", which removes it with its quotes, files, link history, and rating.
+
 The certification is AT Legacy Services' own. The certificate and the For companies page both say it is not a state license. Florida uses "certified contractor" for a state license class, so don't call an approved company "certified" on its own.
 
 ## Rules the code enforces
@@ -91,6 +117,8 @@ The certification is AT Legacy Services' own. The certificate and the For compan
 - A partner can be approved only after the registration, insurance, and references checks are ticked, plus the license check when the trade needs one (`server/lib/catalog.js`), and after a site visit that meets every must-meet item of the standard. The owner's own crew is exempt.
 - A scorecard's boxes are named after each item's wording, not its place in the list, so a scorecard opened before the standard changed can't tick the wrong item.
 - Each quote is in the partner's name. The site never sets a price.
+- A rating is taken only for a request whose customer chose a company, and only once. It is public only when the customer agreed and the owner turned it on.
+- A contact message needs a name, a phone number or an email, and a message. Ten tries an hour from one connection.
 - The AI sees the job description only, never the customer's name, phone, or email. Any AI failure falls back to the plain brief.
 - AI briefs are capped at 300 a day across all visitors.
 
@@ -108,7 +136,7 @@ Set these on the service's **Environment** tab in Slipway (see `.env.example`).
 | `AI_MODEL` | No | Defaults to `claude-haiku-5-5` |
 | `FEE_PERCENT` | No | Finder's fee on new quote links. Defaults to 5 |
 | `PUBLIC_URL` | Recommended | The hub's public address, such as `https://atlegacyservices.com`. Used for the sign-in redirect, for links copied from the dashboard, and to keep sign-in cookies HTTPS-only. Defaults to the address you opened the dashboard on |
-| `RESEND_API_KEY`, `NOTIFY_FROM`, `NOTIFY_TO` | No | Emails you when a request or application arrives |
+| `RESEND_API_KEY`, `NOTIFY_FROM`, `NOTIFY_TO` | No | Emails you when a request, application, message, quote, site-visit request, choice, rating, or document to check arrives. With the first two set, a customer who gave an email also gets their private link by email |
 | `SITE_ORIGINS` | With a static copy | Comma-separated addresses whose pages may send forms to this hub, such as `https://atlegacyservices.com` |
 | `DASHBOARD_URL` | With a dashboard service | The dashboard service's public address. On the public site, `/admin` redirects there |
 | `DASHBOARD_ONLY` | Dashboard service | `1` makes the app serve only `/admin` and the files it loads |
@@ -197,6 +225,10 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `site/quote.html`, `site/quote.js` | Request form and brief review |
 | `site/uploads.js` | The "add" buttons for pictures and files: shrinks each picture, shows what was added, and sends it |
 | `site/partners.html`, `site/partners.js` | Partner application |
+| `site/about.html`, `site/privacy.html`, `site/terms.html` | About page, and the privacy and terms drafts |
+| `site/standard.html`, `site/standard.js` | The public standard, filled from the dashboard's standard |
+| `site/contact.html`, `site/contact.js` | Contact form. Messages land in the dashboard's Messages tab |
+| `business.json`, `server/lib/business.js` | The business's own details, and the helper that fills them into each page |
 | `server/index.js`, `server/app.js` | Server start-up and routing |
 | `server/schema.sql`, `server/migrate.js`, `server/db.js` | Database tables and migration |
 | `server/routes/public.js` | Request, brief, and application API |

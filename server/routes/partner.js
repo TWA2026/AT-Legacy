@@ -40,6 +40,9 @@ async function sharedFiles(pool, quote) {
   return files.filter((file) => file.sharing === "shared").map((file) => ({ ...file, shown: names.get(file.id) }));
 }
 
+// The answers a company can give about a permit. The customer sees them side by side.
+const PERMITS = ["We pull the permit, and it is in the price", "We pull the permit, and its cost is extra", "No permit is needed", "Not sure yet"];
+
 function quoteForm(quote, error) {
   const value = (name) => esc(quote.form ? quote.form[name] : quote[name] || "");
   const amount = quote.form ? quote.form.amount : (quote.amount_cents ? formatDollars(quote.amount_cents) : "");
@@ -60,10 +63,32 @@ function quoteForm(quote, error) {
           <textarea id="includes" name="includes" rows="4" maxlength="600" required>${value("includes")}</textarea>
         </div>
         <div class="field wide">
+          <label for="excludes">What it doesn&rsquo;t include <span class="optional">(optional)</span></label>
+          <input id="excludes" name="excludes" type="text" maxlength="300" value="${value("excludes")}" aria-describedby="excludes-help">
+          <span class="help" id="excludes-help">Anything the customer might expect that isn&rsquo;t in this price.</span>
+        </div>
+        <div class="field">
+          <label for="start_by">Earliest start <span class="optional">(optional)</span></label>
+          <input id="start_by" name="start_by" type="text" maxlength="120" value="${value("start_by")}">
+        </div>
+        <div class="field">
+          <label for="permit">Permit <span class="optional">(optional)</span></label>
+          <select id="permit" name="permit">
+            <option value="">Choose one</option>
+            ${PERMITS.map((choice) => `<option${(quote.form ? quote.form.permit : quote.permit) === choice ? " selected" : ""}>${esc(choice)}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field wide">
+          <label for="payment_terms">Payment terms <span class="optional">(optional)</span></label>
+          <input id="payment_terms" name="payment_terms" type="text" maxlength="200" value="${value("payment_terms")}" aria-describedby="terms-help">
+          <span class="help" id="terms-help">For example: 30% to start, the rest when the job is done.</span>
+        </div>
+        <div class="field wide">
           <label for="warranty">Warranty <span class="optional">(optional)</span></label>
           <input id="warranty" name="warranty" type="text" maxlength="200" value="${value("warranty")}">
         </div>
       </div>
+      <p class="form-note">The customer sees your quote beside the others, line by line, so the more of this you fill in the better it compares.</p>
       <div class="done-actions">
         <button class="primary" type="submit" name="action" value="submit">${quote.status === "submitted" ? "Update my quote" : "Send my quote"}</button>
         <button class="secondary" type="submit" name="action" value="visit" formnovalidate>I need a site visit first</button>
@@ -123,7 +148,7 @@ function render(quote, error, ownerPreview, files = []) {
   });
 }
 
-module.exports = function partnerRoutes({ pool }) {
+module.exports = function partnerRoutes({ pool, notify = async () => false }) {
   const router = express.Router();
 
   // The name after the secret is only a label for people. The page opens with or without it.
@@ -163,11 +188,16 @@ module.exports = function partnerRoutes({ pool }) {
       const body = req.body || {};
       if (body.action === "visit" || body.action === "decline") {
         await pool.query("update quotes set status = $1 where id = $2", [body.action === "visit" ? "visit" : "declined", quote.id]);
+        notify(quote.company + (body.action === "visit" ? " needs a site visit" : " passed on a job"), requestRef(quote.r_id) + ", " + quote.tier + ": " + quote.company + (body.action === "visit" ? " asked to see the site before pricing." : " passed on this job."));
         return res.redirect(303, pathFor(quote));
       }
 
       const field = (name, max) => String(body[name] || "").trim().slice(0, max);
-      const form = { amount: field("amount", 14), timeline: field("timeline", 120), includes: field("includes", 600), warranty: field("warranty", 200) };
+      const form = {
+        amount: field("amount", 14), timeline: field("timeline", 120), includes: field("includes", 600), warranty: field("warranty", 200),
+        excludes: field("excludes", 300), start_by: field("start_by", 120), payment_terms: field("payment_terms", 200),
+        permit: PERMITS.includes(body.permit) ? body.permit : ""
+      };
       const cents = dollarsToCents(form.amount);
       let problem = "";
       if (!cents) problem = "Enter your price as a dollar amount, like 4950 or 4,950.00.";
@@ -179,10 +209,12 @@ module.exports = function partnerRoutes({ pool }) {
       }
 
       await pool.query(
-        `update quotes set status = 'submitted', amount_cents = $1, timeline = $2, includes = $3, warranty = $4, submitted_at = now()
-          where id = $5`,
-        [cents, form.timeline, form.includes, form.warranty, quote.id]
+        `update quotes set status = 'submitted', amount_cents = $1, timeline = $2, includes = $3, warranty = $4,
+                excludes = $5, start_by = $6, payment_terms = $7, permit = $8, submitted_at = now()
+          where id = $9`,
+        [cents, form.timeline, form.includes, form.warranty, form.excludes, form.start_by, form.payment_terms, form.permit, quote.id]
       );
+      notify("A quote is in from " + quote.company, requestRef(quote.r_id) + ", " + quote.tier + ": " + quote.company + " sent a price. It is on the customer's page now.");
       res.redirect(303, pathFor(quote));
     } catch (error) {
       next(error);

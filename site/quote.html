@@ -6,7 +6,16 @@
   <title>Start a request | AT Legacy Services</title>
   <meta name="description" content="Describe your home project once and choose the quote tiers you want from verified local companies.">
   <meta name="theme-color" content="#13283A">
+  <link rel="canonical" href="https://atlegacyservices.com/quote">
+  <meta property="og:title" content="Start a request | AT Legacy Services">
+  <meta property="og:description" content="Describe your home project once and choose the quote tiers you want from verified local companies.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://atlegacyservices.com/quote">
+  <meta property="og:image" content="https://atlegacyservices.com/og.png">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js" defer></script>
   <script src="uploads.js" defer></script>
@@ -21,7 +30,7 @@
 
   <main class="quote-main">
     <noscript>
-      <p class="form-note">This form needs JavaScript. You can email your request to <a href="mailto:hello@atlegacyservices.com?subject=Quote%20request">hello@atlegacyservices.com</a> instead.</p>
+      <p class="form-note">This form needs JavaScript.<!--if:phone--> You can call or text <a href="{{phoneHref}}">{{phone}}</a> instead.<!--/if:phone--></p>
     </noscript>
 
     <form class="quote-form" id="quote-form" novalidate>
@@ -277,6 +286,7 @@
 
       <fieldset class="form-part tier-part" id="tier-part">
         <legend>Which quotes do you want?</legend>
+        <p class="form-note" id="coverage-note" role="status" hidden></p>
         <p class="form-note" id="tier-help">Choose one, two, or all three. Every company is verified.</p>
         <div class="tier-picks">
           <label class="tier-pick">
@@ -341,6 +351,7 @@
 
       <div class="form-end">
         <p class="form-note">We share your job brief with the companies quoting. Your name and contact details go only to the company you choose. We may use an AI service to write the brief from your job description. Your name, phone, and email are never sent to it.</p>
+        <p class="form-note">By sending a request you agree to our <a class="plain-link" href="/terms">terms</a> and <a class="plain-link" href="/privacy">privacy policy</a>, and to calls or texts about this request from us and from the company you choose.</p>
         <p class="form-error" id="form-error" role="alert" hidden></p>
         <button class="primary" type="submit">Review my job brief</button>
       </div>
@@ -364,6 +375,18 @@
     </section>
   </main>
 
-  <footer class="quote-foot legal">&copy; 2026 AT Legacy Group LLC. Partner companies are independent. AT Legacy Services is not the contractor on their jobs.</footer>
+  <footer class="quote-foot">
+    <nav class="foot-links" aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/quote">Start a request</a>
+      <a href="/about">About</a>
+      <a href="/standard">Our standard</a>
+      <a href="/partners">For companies</a>
+      <a href="/contact">Contact</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </nav>
+    <p class="legal">&copy; 2026 AT Legacy Group LLC. Partner companies are independent. AT Legacy Services is not the contractor on their jobs.</p>
+  </footer>
 </body>
 </html>

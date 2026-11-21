@@ -7,7 +7,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const STAMPED = new Set(["styles.css", "app.js", "home.js", "quote.js", "partners.js", "uploads.js", "config.js"]);
+const STAMPED = new Set(["styles.css", "app.js", "home.js", "quote.js", "partners.js", "uploads.js", "contact.js", "standard.js", "config.js"]);
 
 function fingerprint(dir, file) {
   try {

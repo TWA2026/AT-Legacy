@@ -3,6 +3,7 @@ const path = require("node:path");
 const express = require("express");
 const { page } = require("./lib/html");
 const { stampPage } = require("./lib/stamp");
+const business = require("./lib/business");
 const { createNotifier } = require("./lib/notify");
 
 const SITE_DIR = path.join(__dirname, "..", "site");
@@ -118,10 +119,15 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
 
     // The public pages. Each names its stylesheet and scripts by fingerprint and is checked again on
     // every visit, so a new page never loads with a stylesheet a browser saved from an older one.
-    const PAGES = { "/": "index.html", "/index.html": "index.html", "/quote": "quote.html", "/quote.html": "quote.html", "/partners": "partners.html", "/partners.html": "partners.html" };
+    const PAGES = { "/": "index.html", "/index.html": "index.html" };
+    for (const name of ["quote", "partners", "about", "standard", "contact", "privacy", "terms"]) {
+      PAGES["/" + name] = name + ".html";
+      PAGES["/" + name + ".html"] = name + ".html";
+    }
+    const details = business.load();;
     const stampedPages = new Map();
     const sitePage = (file) => {
-      if (!stampedPages.has(file)) stampedPages.set(file, stampPage(fs.readFileSync(path.join(SITE_DIR, file), "utf8"), SITE_DIR));
+      if (!stampedPages.has(file)) stampedPages.set(file, stampPage(business.fill(fs.readFileSync(path.join(SITE_DIR, file), "utf8"), details), SITE_DIR));
       return stampedPages.get(file);
     };
     app.get(Object.keys(PAGES), (req, res) => {

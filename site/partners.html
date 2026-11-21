@@ -6,7 +6,16 @@
   <title>For local companies | AT Legacy Services</title>
   <meta name="description" content="Apply to receive quote requests from homeowners in Land O' Lakes and nearby Pasco County. No lead fees. A finder's fee only when you're hired.">
   <meta name="theme-color" content="#13283A">
+  <link rel="canonical" href="https://atlegacyservices.com/partners">
+  <meta property="og:title" content="For local companies | AT Legacy Services">
+  <meta property="og:description" content="Apply to receive quote requests from homeowners in Land O' Lakes and nearby Pasco County. No lead fees.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://atlegacyservices.com/partners">
+  <meta property="og:image" content="https://atlegacyservices.com/og.png">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js" defer></script>
   <script src="partners.js" defer></script>
@@ -57,7 +66,7 @@
         </li>
         <li>
           <h3>You go on the list</h3>
-          <p>Meet the basics and you&rsquo;re an approved vendor, with a certificate you can show your customers. We come back for another visit to keep it current. This is our own standard, not a state license.</p>
+          <p>Meet the basics and you&rsquo;re an approved vendor, with a certificate you can show your customers. Customers can read <a class="plain-link" href="/standard">the standard</a> too. We come back for another visit to keep it current. This is our own standard, not a state license.</p>
         </li>
       </ol>
     </section>
@@ -124,7 +133,7 @@
     </section>
 
     <noscript>
-      <p class="form-note">This form needs JavaScript. You can email your details to <a href="mailto:hello@atlegacyservices.com?subject=Partner%20application">hello@atlegacyservices.com</a> instead.</p>
+      <p class="form-note">This form needs JavaScript.<!--if:phone--> You can call or text <a href="{{phoneHref}}">{{phone}}</a> instead.<!--/if:phone--></p>
     </noscript>
 
     <form class="quote-form" id="partner-form" novalidate>
@@ -231,6 +240,18 @@
     </section>
   </main>
 
-  <footer class="quote-foot legal">&copy; 2026 AT Legacy Group LLC</footer>
+  <footer class="quote-foot">
+    <nav class="foot-links" aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/quote">Start a request</a>
+      <a href="/about">About</a>
+      <a href="/standard">Our standard</a>
+      <a href="/partners">For companies</a>
+      <a href="/contact">Contact</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </nav>
+    <p class="legal">&copy; 2026 AT Legacy Group LLC. Partner companies are independent. AT Legacy Services is not the contractor on their jobs.</p>
+  </footer>
 </body>
 </html>

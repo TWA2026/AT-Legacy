@@ -109,3 +109,36 @@ create table if not exists request_files (
   created_at timestamptz not null default now()
 );
 create index if not exists request_files_request on request_files (request_id);
+
+-- Messages sent from the contact page.
+create table if not exists messages (
+  id serial primary key,
+  name text not null,
+  -- A phone number or an email address, as the sender typed it.
+  reach text not null,
+  body text not null,
+  handled boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-- More of each quote, so a customer can compare quotes line by line.
+alter table quotes add column if not exists start_by text not null default '';
+alter table quotes add column if not exists payment_terms text not null default '';
+alter table quotes add column if not exists excludes text not null default '';
+alter table quotes add column if not exists permit text not null default '';
+
+-- What a customer said about the company they hired, after the job. One per request.
+create table if not exists ratings (
+  id serial primary key,
+  request_id integer not null unique references requests(id) on delete cascade,
+  quote_id integer not null references quotes(id) on delete cascade,
+  stars integer not null,
+  again boolean not null,
+  comment text not null default '',
+  -- The customer said it may be shown on the site with their first name.
+  may_publish boolean not null default false,
+  -- The owner chose to show it. Only possible when may_publish is true.
+  published boolean not null default false,
+  seen boolean not null default false,
+  created_at timestamptz not null default now()
+);

@@ -21,6 +21,26 @@
   var picker = uploads ? uploads.mount(form.querySelector("[data-uploads]")) : null;
   // Set once the request is saved, so a second tap can never send it twice.
   var sentTo = "";
+  // Which tiers have an approved company for each service. Loaded once, and only used to say so honestly.
+  var coverage = null;
+  var coverageNote = document.getElementById("coverage-note");
+
+  function showCoverage() {
+    var service = form.elements.service.value;
+    var ready = coverage && coverage[service];
+    var tiers = ["Affordable", "Mid-range", "Premium"];
+    var text = "";
+    if (ready && !isOwnCrew() && service !== "Something else") {
+      var missing = tiers.filter(function (tier) { return ready.indexOf(tier) === -1; });
+      if (missing.length === tiers.length) {
+        text = "We’re still signing up companies for this service. Send your request anyway, and we’ll tell you as soon as an approved company can quote it.";
+      } else if (missing.length) {
+        text = "An approved company is ready for " + ready.join(" and ") + ". We’re still signing one up for " + missing.join(" and ") + ".";
+      }
+    }
+    coverageNote.textContent = text;
+    coverageNote.hidden = !text;
+  }
 
   // Links from the home page can name a service or a tier.
   var params = new URLSearchParams(window.location.search);
@@ -73,9 +93,17 @@
   form.elements.service.addEventListener("change", function () {
     showTiers();
     showServiceInfo();
+    showCoverage();
   });
   showTiers();
   showServiceInfo();
+
+  fetch(api + "/api/coverage").then(function (response) {
+    return response.ok ? response.json() : null;
+  }).then(function (data) {
+    coverage = data;
+    showCoverage();
+  }).catch(function () {});
 
   form.addEventListener("input", function () {
     errorBox.hidden = true;

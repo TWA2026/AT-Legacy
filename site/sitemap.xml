@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://atlegacyservices.com/</loc></url>
-  <url><loc>https://atlegacyservices.com/quote.html</loc></url>
-  <url><loc>https://atlegacyservices.com/partners.html</loc></url>
+  <url><loc>https://atlegacyservices.com/quote</loc></url>
+  <url><loc>https://atlegacyservices.com/partners</loc></url>
+  <url><loc>https://atlegacyservices.com/about</loc></url>
+  <url><loc>https://atlegacyservices.com/standard</loc></url>
+  <url><loc>https://atlegacyservices.com/contact</loc></url>
+  <url><loc>https://atlegacyservices.com/privacy</loc></url>
+  <url><loc>https://atlegacyservices.com/terms</loc></url>
 </urlset>

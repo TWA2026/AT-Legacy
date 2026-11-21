@@ -11,6 +11,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { stampPage } = require("../server/lib/stamp");
+const business = require("../server/lib/business");
 
 const root = path.join(__dirname, "..");
 const out = path.join(root, "dist");
@@ -25,7 +26,9 @@ fs.cpSync(path.join(root, "site"), out, { recursive: true });
 // The dashboard's copy-button script is not part of the public pages.
 fs.rmSync(path.join(out, "app.js"), { force: true });
 fs.writeFileSync(path.join(out, "config.js"), "window.ATL_API = " + JSON.stringify(hub) + ";\n");
+// Each page is filled from business.json (phone, About, and so on), then its files are fingerprinted.
+const details = business.load();
 for (const file of fs.readdirSync(out).filter((name) => name.endsWith(".html"))) {
-  fs.writeFileSync(path.join(out, file), stampPage(fs.readFileSync(path.join(out, file), "utf8"), out));
+  fs.writeFileSync(path.join(out, file), stampPage(business.fill(fs.readFileSync(path.join(out, file), "utf8"), details), out));
 }
 console.log("Built dist/ with the request API at " + hub);

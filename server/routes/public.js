@@ -5,6 +5,7 @@ const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER } = require("../li
 const { buildBrief, plainBrief } = require("../lib/brief");
 const { newToken, sign, safeEqual, rateLimiter } = require("../lib/security");
 const { BODY_LIMIT, FileError, saveFile } = require("../lib/files");
+const { loadStandard } = require("../lib/standard");
 
 const PROPERTIES = ["My home", "My rental property", "Other"];
 const TIMINGS = ["As soon as possible", "Within a month", "In 1 to 3 months", "I’m flexible"];
@@ -104,7 +105,86 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
           name, phone, email, contact]
       );
       notify("New quote request: " + job.service, "A new request for " + job.service + " in " + job.location + " is waiting in your dashboard." + (config.publicUrl ? "\n\n" + config.publicUrl + "/admin" : ""));
-      res.status(201).json({ url: customerPath({ id: saved.rows[0].id, token, name }) });
+      const url = customerPath({ id: saved.rows[0].id, token, name });
+      // The customer's own copy of their link, when they gave an email address and email is set up.
+      if (email && notify.send) {
+        notify.send(email, "Your quote request with AT Legacy Services",
+          "We have your " + job.service.toLowerCase() + " request. Your quotes will appear on your private page:\n\n" + config.publicUrl + url +
+          "\n\nKeep this link. It is the only way back to your quotes.\n\nAT Legacy Services");
+      }
+      res.status(201).json({ url });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // A message from the contact page. It lands in the dashboard's Messages tab.
+  // Ten tries an hour from one connection: room for a few typos, not for a flood.
+  const messageLimit = rateLimiter({ limit: 10, windowMs: 3600 * 1000 });
+  router.post("/messages", guard(messageLimit), async (req, res, next) => {
+    try {
+      const body = req.body || {};
+      const clean = (value, max) => String(value == null ? "" : value).replace(/[ \t]+/g, " ").replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, max);
+      // A hidden field that people leave empty and form-filling bots do not.
+      if (clean(body.company_url, 200)) return res.status(201).json({ ok: true });
+      const message = { name: clean(body.name, 100).replace(/\n/g, " "), reach: clean(body.reach, 200).replace(/\n/g, " "), text: clean(body.message, 2000) };
+      if (!message.name) return res.status(400).json({ error: "Enter your name." });
+      if (message.reach.replace(/\D/g, "").length < 10 && !/^\S+@\S+\.\S+$/.test(message.reach)) {
+        return res.status(400).json({ error: "Enter a phone number or an email address, so we can answer you." });
+      }
+      if (message.text.length < 5) return res.status(400).json({ error: "Write your message." });
+      await pool.query("insert into messages (name, reach, body) values ($1, $2, $3)", [message.name, message.reach, message.text]);
+      notify("New message from " + message.name, message.name + " sent a message from the contact page. It is waiting in your dashboard.");
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Which tiers have an approved company for each service, so the request form can say so plainly.
+  router.get("/coverage", async (req, res, next) => {
+    try {
+      const rows = (await pool.query("select distinct trade, tier from partners where status = 'verified'")).rows;
+      const coverage = {};
+      for (const name of SERVICE_NAMES) coverage[name] = name === OWN_CREW_SERVICE ? TIERS.slice() : TIERS.filter((tier) => rows.some((row) => row.trade === name && row.tier === tier));
+      res.set("Cache-Control", "public, max-age=60").json(coverage);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The standard every approved company is held to, as the public page shows it.
+  // The wording is the owner's. Points and the numbers each tier needs stay private.
+  router.get("/standard", async (req, res, next) => {
+    try {
+      const standard = await loadStandard(pool);
+      res.set("Cache-Control", "public, max-age=60").json({
+        must: standard.items.filter((item) => item.kind === "must").map((item) => item.label),
+        more: standard.items.filter((item) => item.kind === "points").map((item) => item.label),
+        months: standard.reviewMonths
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Ratings the customer agreed to share and the owner chose to show.
+  router.get("/reviews", async (req, res, next) => {
+    try {
+      const rows = (await pool.query(
+        `select g.stars, g.comment, g.created_at, r.name, r.service, p.company
+           from ratings g join requests r on r.id = g.request_id join quotes q on q.id = g.quote_id join partners p on p.id = q.partner_id
+          where g.published and g.may_publish order by g.created_at desc limit 12`
+      )).rows;
+      res.set("Cache-Control", "public, max-age=60").json(rows.map((row) => ({
+        stars: row.stars,
+        comment: row.comment,
+        // A first name only.
+        name: String(row.name).trim().split(/\s+/)[0],
+        service: row.service,
+        company: row.company,
+        when: new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "America/New_York" }).format(row.created_at)
+      })));
     } catch (error) {
       next(error);
     }
@@ -125,6 +205,7 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
       if (!request) return res.status(404).json({ error: "We couldn’t find that request." });
       if (!Buffer.isBuffer(req.body)) throw new FileError(415, "We can take pictures and PDF files. This file is neither.");
       const file = await saveFile(pool, request, { kind: String(req.query.kind || ""), name: String(req.query.name || ""), data: req.body });
+      if (file.sharing === "review") notify("A document is waiting for your check", "A customer added a document to a request. No company can see it until you decide. It is in your dashboard.");
       res.status(201).json({ id: file.id, kind: file.kind, name: file.name, size: file.size });
     } catch (error) {
       if (error instanceof FileError) return res.status(error.status).json({ error: error.message });

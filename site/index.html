@@ -14,8 +14,11 @@
   <meta property="og:image" content="https://atlegacyservices.com/og.png">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="preload" href="fonts/alfa-slab-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
+  <script src="config.js" defer></script>
   <script src="home.js" defer></script>
   <script type="application/ld+json">
   {
@@ -24,7 +27,12 @@
     "name": "AT Legacy Services",
     "legalName": "AT Legacy Group LLC",
     "url": "https://atlegacyservices.com/",
-    "email": "hello@atlegacyservices.com",
+<!--if:email-->
+    "email": "{{email}}",
+<!--/if:email-->
+<!--if:phone-->
+    "telephone": "{{phone}}",
+<!--/if:phone-->
     "description": "A quote service that connects homeowners with verified local home service companies.",
     "areaServed": "Pasco County, FL"
   }
@@ -161,6 +169,10 @@
       <li>
         <strong>Checked before they quote</strong>
         <span>Registration, license, and insurance confirmed.</span>
+      </li>
+      <li>
+        <strong>One company gets your number</strong>
+        <span>Your name and contact details go only to the company you pick.</span>
       </li>
       <li>
         <strong>You choose</strong>
@@ -337,9 +349,17 @@
         </li>
         <li>
           <span class="wear-cause">Site visit</span>
-          <span class="wear-problem">We visit one of their job sites, or their shop, and score it against our own written standard.</span>
+          <span class="wear-problem">We visit one of their job sites, or their shop, and score it against <a class="plain-link" href="/standard">our own written standard</a>.</span>
         </li>
       </ul>
+    </section>
+
+    <section class="band reviews" id="reviews" aria-labelledby="reviews-title" hidden>
+      <div class="band-intro">
+        <h2 id="reviews-title">What customers say</h2>
+        <p>Every rating here comes from a customer who hired a company through us.</p>
+      </div>
+      <ul class="review-list" id="review-list"></ul>
     </section>
 
     <section class="guarantee partner-band" aria-labelledby="partner-title">
@@ -360,6 +380,14 @@
         <details>
           <summary>Who does the work?</summary>
           <p>The company you choose. Each quote comes from that company, and you hire and pay them directly. AT Legacy Services doesn&rsquo;t set the price and isn&rsquo;t the contractor.</p>
+        </details>
+        <details>
+          <summary>Who gets my phone number?</summary>
+          <p>Only the company you choose. The companies quoting see your job brief and your pictures, not your name or contact details. Your request isn&rsquo;t sold or passed around.</p>
+        </details>
+        <details>
+          <summary>What if you don&rsquo;t have a company for my job?</summary>
+          <p>We tell you. We&rsquo;re new, and we add companies one site visit at a time. If no approved company covers your job yet, we say so instead of sending you someone we haven&rsquo;t checked.</p>
         </details>
         <details>
           <summary>Do I have to pick one of the quotes?</summary>
@@ -392,8 +420,13 @@
         <h2>Start a request</h2>
         <p>Describe the job once and choose your tiers.</p>
         <a class="button" href="quote.html">Start a request</a>
-        <!-- EDIT: to change the email, replace the address in both places on the next line. -->
-        <p>Questions? Email <a class="plain-link" href="mailto:hello@atlegacyservices.com">hello@atlegacyservices.com</a>.</p>
+        <!-- The phone number and the email come from business.json. Each shows only once it is filled in there. -->
+<!--if:phone-->
+        <p>Questions? Call or text <a class="plain-link" href="{{phoneHref}}">{{phone}}</a>, or <a class="plain-link" href="/contact">send us a message</a>.</p>
+<!--/if:phone-->
+<!--if:!phone-->
+        <p>Questions? <a class="plain-link" href="/contact">Send us a message</a>.</p>
+<!--/if:!phone-->
       </div>
     </div>
     <div class="foot">
@@ -402,6 +435,11 @@
         <a href="#tiers">Tiers</a>
         <a href="#services">Services</a>
         <a href="partners.html">For companies</a>
+        <a href="/about">About</a>
+        <a href="/standard">Our standard</a>
+        <a href="/contact">Contact</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
       </nav>
       <p class="legal">&copy; 2026 AT Legacy Group LLC. Partner companies are independent. AT Legacy Services is not the contractor on their jobs.</p>
     </div>

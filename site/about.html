@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>About | AT Legacy Services</title>
+  <meta name="description" content="Who runs AT Legacy Services, why it exists, and how it works for homeowners in Land O' Lakes and nearby Pasco County.">
+  <meta name="theme-color" content="#13283A">
+  <link rel="canonical" href="https://atlegacyservices.com/about">
+  <meta property="og:title" content="About | AT Legacy Services">
+  <meta property="og:description" content="Who runs AT Legacy Services, why it exists, and how it works for homeowners in Land O' Lakes and nearby Pasco County.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://atlegacyservices.com/about">
+  <meta property="og:image" content="https://atlegacyservices.com/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="fonts/alfa-slab-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+
+</head>
+<body>
+  <header class="quote-head">
+    <a class="brand" href="/" aria-label="AT Legacy Services, home"><img src="favicon.svg" alt="" width="44" height="44"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>
+    <h1>About us</h1>
+    <p>A local quote service for home projects in Land O&rsquo; Lakes and nearby Pasco County.</p>
+  </header>
+
+  <main class="quote-main read">
+    <section class="read-part">
+      <h2>Who runs it</h2>
+<!--if:about-->
+        {{aboutParagraphs}}
+<!--/if:about-->
+<!--if:!about-->
+      <p>AT Legacy Services is run by AT Legacy Group LLC, a Florida company based in Land O&rsquo; Lakes.</p>
+<!--/if:!about-->
+<!--if:owner-->
+      <p class="read-sign">{{owner}}, {{ownerRole}}</p>
+<!--/if:owner-->
+    </section>
+
+    <section class="read-part">
+      <h2>Why we built it</h2>
+      <p>Many quote sites pass one request to several companies at once, and your phone rings for days. We do it the other way round. Your job goes to one approved company in each price tier you ask for, and your name and number go only to the company you choose.</p>
+    </section>
+
+    <section class="read-part">
+      <h2>How we work</h2>
+      <ul class="read-points">
+        <li><strong>One brief.</strong> We turn your answers into one clear job brief, so every company prices the same job.</li>
+        <li><strong>Companies we have visited.</strong> Before a company can quote, we check its paperwork and visit one of its job sites or its shop. <a href="/standard">Read our standard</a>.</li>
+        <li><strong>You stay in charge.</strong> Compare the quotes side by side, pick one, or hire no one. You hire and pay the company directly.</li>
+      </ul>
+    </section>
+
+    <section class="read-part">
+      <h2>What we are not</h2>
+      <p>We aren&rsquo;t the contractor on a partner company&rsquo;s job. Each company holds its own license and insurance, gives its own warranty, and makes its own agreement with you. Small repairs and upkeep are the exception: our own crew does those.</p>
+    </section>
+
+    <section class="read-part">
+      <h2>Talk to us</h2>
+<!--if:phone-->
+      <p>Call or text <a href="{{phoneHref}}">{{phone}}</a><!--if:hours-->, {{hours}}<!--/if:hours-->.</p>
+<!--/if:phone-->
+      <p><a class="secondary" href="/contact">Send us a message</a></p>
+    </section>
+  </main>
+
+  <footer class="quote-foot">
+    <nav class="foot-links" aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/quote">Start a request</a>
+      <a href="/about">About</a>
+      <a href="/standard">Our standard</a>
+      <a href="/partners">For companies</a>
+      <a href="/contact">Contact</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </nav>
+    <p class="legal">&copy; 2026 AT Legacy Group LLC. Partner companies are independent. AT Legacy Services is not the contractor on their jobs.</p>
+  </footer>
+</body>
+</html>

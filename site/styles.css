@@ -3172,3 +3172,404 @@ html {
 .owner-storage {
   margin-top: 18px;
 }
+
+/* Reading pages: About, Our standard, Contact, Privacy, Terms. */
+.read {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 40px;
+}
+
+.read-part {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  max-width: 44em;
+}
+
+.read-part h2 {
+  font-size: clamp(1.5rem, 4.6vw, 2rem);
+}
+
+.read-part h3 {
+  margin-top: 10px;
+  font-size: 1.2rem;
+}
+
+.read-part p,
+.read-part ul {
+  margin: 0;
+}
+
+.read-part a:not(.secondary):not(.primary),
+.quote-foot .foot-links a {
+  color: var(--navy);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
+}
+
+.read-part a:focus-visible,
+.quote-foot .foot-links a:focus-visible {
+  outline: 3px solid var(--bay);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.read-points,
+.read-checks {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.read-points li {
+  padding-left: 18px;
+  border-left: 4px solid var(--glass);
+}
+
+/* A gold check before each item of the standard */
+.read-checks li {
+  position: relative;
+  padding-left: 34px;
+}
+
+.read-checks li::before {
+  content: "";
+  position: absolute;
+  top: 0.3em;
+  left: 8px;
+  width: 8px;
+  height: 14px;
+  border: solid var(--gold);
+  border-width: 0 4px 4px 0;
+  transform: rotate(45deg);
+}
+
+.read-sign {
+  font-weight: 800;
+}
+
+.foot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin-bottom: 14px;
+}
+
+/* Messages and ratings in the dashboard */
+.message-list {
+  display: grid;
+  gap: 14px;
+  max-width: 760px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.message {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  padding: 16px 18px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-left: 6px solid var(--glass);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.message.needs-you {
+  border-left-color: var(--gold);
+}
+
+.message p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.message-when {
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+.message-body {
+  white-space: pre-line;
+}
+
+/* The company record on a quote, and the customer's own rating */
+.quote-record {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding-top: 12px;
+  border-top: 2px solid var(--navy);
+}
+
+.quote-record h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.quote-record ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+.quote-record li {
+  padding-left: 14px;
+  border-left: 3px solid var(--glass);
+  overflow-wrap: anywhere;
+}
+
+.quote-record .record-shown {
+  margin: 4px 0 0;
+  color: var(--navy);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.record-shown + ul li {
+  border-left-color: var(--gold);
+}
+
+/* In the side-by-side table the record sits in a cell, so it needs no rule of its own above it. */
+.compare .quote-record {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.compare .quote-record ul,
+.compare .quote-record .record-shown {
+  font-size: 0.92em;
+}
+
+/* The quotes, the table, and the note under them read as one part of the page. */
+.quote-list {
+  margin-bottom: 20px;
+}
+
+.compare-part {
+  margin: 32px 0 24px;
+}
+
+.quote-after {
+  justify-items: start;
+}
+
+.keep-link {
+  max-width: 760px;
+  padding: 18px 20px 20px;
+  border-left: 6px solid var(--gold);
+  background: var(--white);
+}
+
+.print-action,
+.rating-said {
+  margin: 0;
+}
+
+.rating-said {
+  max-width: 44em;
+  padding-left: 18px;
+  border-left: 4px solid var(--glass);
+}
+
+.rating-form {
+  gap: 26px;
+}
+
+.rating-form .tier-part legend {
+  margin-bottom: 10px;
+  font-family: inherit;
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+/* Quotes side by side. A phone shows the cards instead; the table is for wide screens and paper. */
+.compare-part {
+  display: none;
+}
+
+.compare {
+  width: 100%;
+  max-width: 1100px;
+  border-collapse: collapse;
+  background: var(--white);
+  table-layout: fixed;
+}
+
+.compare th,
+.compare td {
+  padding: 12px 14px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.compare thead th {
+  background: var(--navy);
+  color: var(--shell);
+}
+
+.compare thead th span {
+  display: block;
+  color: var(--glass);
+  font-weight: 400;
+}
+
+.compare thead td {
+  border: 0;
+  background: var(--shell);
+}
+
+.compare tbody th {
+  width: 9.5em;
+  color: var(--slate);
+  font-weight: 600;
+}
+
+.compare-none {
+  color: var(--slate);
+}
+
+/* With the table on screen, each card keeps only what you need to choose: the company and its price. */
+@media (min-width: 900px) {
+  .compare-part {
+    display: grid;
+  }
+
+  .has-compare .quote-facts,
+  .has-compare .quote-record {
+    display: none;
+  }
+}
+
+/* Customer ratings on the home page */
+.review-list {
+  display: grid;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-list li {
+  display: grid;
+  gap: 8px;
+  padding: 20px 22px;
+  border-left: 6px solid var(--gold);
+  background: var(--white);
+}
+
+.review-list p {
+  margin: 0;
+}
+
+.review-stars {
+  color: var(--navy);
+  font-size: 1.2rem;
+  letter-spacing: 0.08em;
+}
+
+.review-who {
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+@media (min-width: 1100px) {
+  .review-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* On paper a private page is just its facts: no buttons, forms, or ways to add things. */
+@media print {
+  .keep-link,
+  .print-action,
+  .file-add,
+  .rating-form,
+  .owner-preview,
+  .quote-card form,
+  .file-card form {
+    display: none;
+  }
+
+  /* On paper the table is the comparison, so the cards above it would only say it twice. */
+  .compare-part {
+    display: grid;
+    margin-top: 0;
+  }
+
+  .quote-list.has-compare {
+    display: none;
+  }
+
+  .compare {
+    font-size: 0.85rem;
+  }
+
+  .compare th,
+  .compare td {
+    padding: 8px 10px;
+  }
+
+  .compare tbody th {
+    width: 7em;
+  }
+
+  /* Short rows stay whole. The record is long, so it may run on to the next sheet. */
+  .compare tr {
+    break-inside: avoid;
+  }
+
+  .compare tr:last-child {
+    break-inside: auto;
+  }
+
+  /* Most browsers leave backgrounds off paper, so anything light on dark is set dark on white. */
+  .quote-main,
+  .quote-head,
+  .quote-foot,
+  .compare thead th {
+    background: none;
+  }
+
+  .quote-head,
+  .quote-head h1,
+  .quote-head p,
+  .quote-head .brand-name,
+  .quote-head .brand-sub,
+  .compare thead th,
+  .compare thead th span {
+    color: var(--navy);
+  }
+
+  .quote-head {
+    padding-top: 0;
+    padding-bottom: 16px;
+    border-bottom: 3px solid var(--navy);
+  }
+
+  .quote-head h1 {
+    margin-top: 6px;
+    font-size: 2rem;
+  }
+
+  .quote-main {
+    padding-top: 20px;
+  }
+
+  .compare thead th {
+    border-bottom: 3px solid var(--navy);
+  }
+}

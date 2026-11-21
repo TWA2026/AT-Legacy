@@ -98,7 +98,7 @@ async function addVerifiedPartner(site, admin, company, tier, trade = "Fence") {
 
 test.before(async () => {
   pool = createPool(DATABASE_URL);
-  await pool.query("drop table if exists request_files, link_events, quotes, requests, partners, settings cascade");
+  await pool.query("drop table if exists ratings, messages, request_files, link_events, quotes, requests, partners, settings cascade");
   await migrate(pool);
   await migrate(pool); // safe to repeat
   secret = await loadSecret(pool);
@@ -1508,6 +1508,278 @@ test("the request form carries the same file buttons as the customer's page, and
   assert.ok(Number(/var JPEG_BYTES = (\d+);/.exec(uploader)[1]) < files.LIMITS.jpegBytes);
   // The pictures a browser may show are its own files and ones it drew itself. The uploader needs nothing more.
   assert.ok(!/createObjectURL|innerHTML|\.style\./.test(uploader));
+});
+
+test("business details: one file fills every page, and an empty detail takes its section away", async () => {
+  const business = require("../server/lib/business");
+  const filled = business.details({ phone: "(813) 555-0142", owner: " Ty ", about: ["Built here. <b>", "  "], hours: "Monday to Saturday", reply: "one business day", email: "hello@example.test", emailReady: true });
+  assert.deepEqual([filled.phone, filled.phoneHref, filled.smsHref, filled.owner, filled.about, filled.email, filled.direct],
+    ["(813) 555-0142", "tel:+18135550142", "sms:+18135550142", "Ty", ["Built here. <b>"], "hello@example.test", true]);
+  assert.equal(business.details({ phone: "555-0142" }).phone, "", "a number that can't be dialed is not shown");
+  assert.equal(business.details({ email: "hello@example.test" }).email, "", "an address is shown only once it is marked as working");
+  const page = "A<!--if:phone-->[{{phone}}|{{phoneHref}}]<!--/if:phone-->B<!--if:!phone-->none<!--/if:!phone-->C<!--if:about-->{{aboutParagraphs}}<!--/if:about-->";
+  assert.equal(business.fill(page, filled), "A[(813) 555-0142|tel:+18135550142]BC<p>Built here. &lt;b&gt;</p>");
+  assert.equal(business.fill(page, business.details({})), "ABnoneC");
+
+  // The repository's own file starts empty, so the live pages show no phone number, no email, and nothing half filled.
+  const site = await start();
+  const names = ["", "quote", "partners", "about", "standard", "contact", "privacy", "terms"];
+  for (const name of names) {
+    const response = await site.get("/" + name);
+    assert.equal(response.status, 200, name);
+    const html = await response.text();
+    assert.ok(!/\{\{|<!--\/?if:/.test(html), name + " has nothing left unfilled");
+    assert.ok(!html.includes("hello@atlegacyservices.com") && !html.includes("tel:"), name + " shows no contact detail that isn't set");
+    assert.ok(html.includes('href="/privacy"') && html.includes('href="/terms"') && html.includes('href="/contact"'), name + " links the policy pages");
+    assert.ok(html.includes('rel="canonical" href="https://atlegacyservices.com/' + name + '"'), name + " names its own address");
+    assert.ok(html.includes('rel="apple-touch-icon"'), name);
+    assert.equal((await site.get("/" + name + (name ? ".html" : "index.html"))).status, 200);
+  }
+  const about = await (await site.get("/about")).text();
+  assert.match(about, /run by AT Legacy Group LLC, a Florida company based in Land O&rsquo; Lakes/);
+  assert.doesNotMatch(await (await site.get("/contact")).text(), /Reach us directly/);
+  const home = await (await site.get("/")).text();
+  assert.match(home, /<strong>One company gets your number<\/strong>/);
+  assert.match(home, /<summary>Who gets my phone number\?<\/summary>/);
+  assert.match(home, /<section class="band reviews" id="reviews" aria-labelledby="reviews-title" hidden>/);
+  assert.ok(home.indexOf('src="config.js') > 0 && home.indexOf('src="config.js') < home.indexOf('src="home.js'), "the home page knows where the API is");
+  assert.doesNotThrow(() => JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(home)[1]));
+  for (const file of ["apple-touch-icon.png", "favicon-48.png", "favicon.ico", "contact.js", "standard.js"]) assert.equal((await site.get("/" + file)).status, 200, file);
+  const map = fs.readFileSync(path.join(__dirname, "..", "site", "sitemap.xml"), "utf8");
+  for (const name of names) assert.ok(map.includes("<loc>https://atlegacyservices.com/" + name + "</loc>"), name);
+  assert.ok(!map.includes(".html"));
+
+  // With details filled in, the same pages show them. Checked on the built copy, which is what the public site serves.
+  const root = path.join(__dirname, "..");
+  const real = fs.readFileSync(path.join(root, "business.json"), "utf8");
+  try {
+    fs.writeFileSync(path.join(root, "business.json"), JSON.stringify({ phone: "813-555-0142", owner: "Ty Sample", about: ["I started this after one too many pushy sales calls."], hours: "Monday to Saturday, 8 to 6", reply: "one business day", email: "hello@atlegacyservices.com", emailReady: true }));
+    const built = spawnSync(process.execPath, ["scripts/build-site.js"], { cwd: root, env: { ...process.env, HUB_URL: "https://hub.example.test" }, encoding: "utf8" });
+    assert.equal(built.status, 0, built.stderr);
+    const read = (name) => fs.readFileSync(path.join(root, "dist", name), "utf8");
+    assert.match(read("index.html"), /Call or text <a class="plain-link" href="tel:\+18135550142">813-555-0142<\/a>/);
+    assert.equal(JSON.parse(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(read("index.html"))[1]).telephone, "813-555-0142");
+    assert.match(read("about.html"), /<p>I started this after one too many pushy sales calls\.<\/p>\s*<p class="read-sign">Ty Sample, Owner<\/p>/);
+    assert.doesNotMatch(read("about.html"), /run by AT Legacy Group LLC, a Florida company/);
+    assert.match(read("contact.html"), /Reach us directly[\s\S]*813-555-0142<\/a>, Monday to Saturday, 8 to 6[\s\S]*mailto:hello@atlegacyservices\.com/);
+    assert.match(read("contact.html"), /We answer within one business day\./);
+    for (const name of fs.readdirSync(path.join(root, "dist")).filter((file) => file.endsWith(".html"))) assert.ok(!/\{\{|<!--\/?if:/.test(read(name)), name);
+    assert.match(read("contact.html"), /src="contact\.js\?v=[a-f0-9]{10}"/);
+  } finally {
+    fs.writeFileSync(path.join(root, "business.json"), real);
+    fs.rmSync(path.join(root, "dist"), { recursive: true, force: true });
+  }
+});
+
+test("contact messages, coverage, and the public standard", async () => {
+  const mail = [];
+  const site = await start({ RESEND_API_KEY: "test-key", NOTIFY_FROM: "site@example.test", NOTIFY_TO: "owner@example.test", SITE_ORIGINS: "https://www.example.test" },
+    async (url, options) => { mail.push(JSON.parse(options.body)); return { ok: true, status: 200 }; });
+  const admin = await login(site);
+  const cookie = { cookie: admin.cookie };
+
+  // A message from the contact page.
+  const bad = async (body, pattern) => {
+    const response = await site.json("/api/messages", body);
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, pattern);
+  };
+  await bad({ name: "", reach: "813-555-0100", message: "Hello there" }, /your name/);
+  await bad({ name: "Pat", reach: "call me", message: "Hello there" }, /phone number or an email/);
+  await bad({ name: "Pat", reach: "pat@example.test", message: "Hi" }, /Write your message/);
+  assert.equal((await site.json("/api/messages", { name: "Bot", reach: "bot@example.test", message: "Buy my links", company_url: "http://spam.test" })).status, 201);
+  assert.equal((await pool.query("select count(*)::int as n from messages")).rows[0].n, 0, "a filled trap field is thrown away");
+  assert.equal((await site.json("/api/messages", { name: "Pat <b>Lee", reach: "(813) 555-0100", message: "Do you cover Lutz?\n\n\n\nThanks <script>" })).status, 201);
+  assert.equal((await site.json("/api/messages", { name: "Sam", reach: "sam@example.test", message: "A second question" })).status, 201);
+  assert.deepEqual(mail.map((m) => [m.to[0], m.subject]), [["owner@example.test", "New message from Pat <b>Lee"], ["owner@example.test", "New message from Sam"]]);
+  assert.match(await (await site.get("/admin", cookie)).text(), /<a href="\/admin\/messages">2 messages to answer<\/a>/);
+  let inbox = await (await site.get("/admin/messages", cookie)).text();
+  assert.ok(inbox.includes("Pat &lt;b&gt;Lee") && inbox.includes('<a href="tel:8135550100">(813) 555-0100</a>') && inbox.includes('<a href="mailto:sam@example.test">sam@example.test</a>'));
+  assert.ok(inbox.includes("Do you cover Lutz?\n\nThanks &lt;script&gt;") && !inbox.includes("<script>"));
+  assert.equal((await site.get("/admin/messages")).status, 303, "signed out: sent to the login page");
+  const first = (await pool.query("select id from messages order by id limit 1")).rows[0].id;
+  assert.equal((await site.form("/admin/messages/" + first + "/handled", { handled: "1" }, cookie)).status, 403, "needs the form token");
+  assert.equal((await site.form("/admin/messages/" + first + "/handled", { csrf: admin.csrf, handled: "1" }, cookie)).status, 303);
+  assert.match(await (await site.get("/admin", cookie)).text(), /1 message to answer/);
+  // An answered message can be deleted. One still waiting can't.
+  const second = (await pool.query("select id from messages order by id desc limit 1")).rows[0].id;
+  assert.equal((await site.form("/admin/messages/" + second + "/handled", { csrf: admin.csrf, handled: "delete" }, cookie)).status, 303);
+  assert.equal((await pool.query("select count(*)::int as n from messages")).rows[0].n, 2);
+  assert.match(await (await site.get("/admin/messages", cookie)).text(), /value="delete">Delete it<\/button>/);
+  assert.equal((await site.form("/admin/messages/" + first + "/handled", { csrf: admin.csrf, handled: "delete" }, cookie)).status, 303);
+  assert.deepEqual((await pool.query("select name from messages")).rows.map((row) => row.name), ["Sam"]);
+  for (let count = 0; count < 4; count += 1) await site.json("/api/messages", { name: "Again", reach: "again@example.test", message: "One more message" });
+  assert.equal((await site.json("/api/messages", { name: "Again", reach: "again@example.test", message: "One more message" })).status, 429, "ten tries an hour from one connection");
+
+  // Coverage: which tiers have an approved company. The owner's own crew always covers its service.
+  // (Other tests approve fence companies in the same database, so this one uses water softeners.)
+  let coverage = await (await site.get("/api/coverage")).json();
+  assert.deepEqual(coverage["Water softener"], []);
+  assert.deepEqual(coverage["Home repairs and upkeep"], ["Affordable", "Mid-range", "Premium"]);
+  await addVerifiedPartner(site, admin, "Coverage Water Co", "Premium", "Water softener");
+  await site.form("/admin/partners", { csrf: admin.csrf, company: "Not Yet Water", contact_name: "A", trade: "Water softener", tier: "Affordable", status: "applied" }, cookie);
+  coverage = await (await site.get("/api/coverage")).json();
+  assert.deepEqual(coverage["Water softener"], ["Premium"], "an applicant doesn't count");
+  assert.deepEqual(coverage["Lawn pest control"], []);
+  assert.deepEqual(Object.keys(coverage).length, 12);
+
+  // The public standard: the owner's wording, without the points or the numbers each tier needs.
+  const { DEFAULT_STANDARD } = require("../server/lib/standard");
+  const standard = await (await site.get("/api/standard")).json();
+  assert.deepEqual(Object.keys(standard).sort(), ["months", "more", "must"]);
+  assert.deepEqual(standard.must, DEFAULT_STANDARD.items.filter((item) => item.kind === "must").map((item) => item.label));
+  assert.equal(standard.more.length, DEFAULT_STANDARD.items.filter((item) => item.kind === "points").length);
+  assert.equal(standard.months, 12);
+  assert.ok(!/points|premium|mid/i.test(JSON.stringify(Object.keys(standard))) && typeof standard.more[0] === "string");
+  assert.match(await (await site.get("/admin/standard", cookie)).text(), /Customers can read these items\./);
+  // The public pages live at another address and read these answers from there.
+  for (const path of ["/api/standard", "/api/coverage", "/api/reviews"]) {
+    const fromSite = await fetch(site.base + path, { headers: { origin: "https://www.example.test" } });
+    assert.equal(fromSite.headers.get("access-control-allow-origin"), "https://www.example.test", path);
+  }
+});
+
+test("a quote line by line: the company record, the side-by-side table, the link to keep, and a rating after the job", async () => {
+  const mail = [];
+  const site = await start({ RESEND_API_KEY: "test-key", NOTIFY_FROM: "site@example.test", NOTIFY_TO: "owner@example.test" },
+    async (url, options) => { mail.push(JSON.parse(options.body)); return { ok: true, status: 200 }; });
+  const admin = await login(site);
+  const cookie = { cookie: admin.cookie };
+  const { url, row } = await createRequest(site, { email: "dana@example.test" });
+  // The customer who gave an email gets their private link by email.
+  const copy = mail.find((m) => m.to[0] === "dana@example.test");
+  assert.ok(copy && copy.text.includes("https://example.test" + url) && copy.subject === "Your quote request with AT Legacy Services");
+  assert.ok(mail.some((m) => m.to[0] === "owner@example.test" && /New quote request/.test(m.subject)));
+
+  const budget = await addVerifiedPartner(site, admin, "Budget Fence LLC", "Affordable");
+  const crown = await addVerifiedPartner(site, admin, "Crown <Fence> & Gate", "Premium");
+  await pool.query("update partners set license_no = 'CFC1429999' where id = $1", [crown.id]);
+  await pool.query("update partners set license_no = 'UNCHECKED-1', check_license = false where id = $1", [budget.id]);
+  for (const [partner, tier] of [[budget, "Affordable"], [crown, "Premium"]]) {
+    assert.equal((await site.form("/admin/requests/" + row.id + "/invite", { csrf: admin.csrf, partner: String(partner.id), tier }, cookie)).status, 303);
+  }
+  const quotes = (await pool.query("select * from quotes where request_id = $1 order by id", [row.id])).rows;
+
+  // Before any quote: a way to keep the link, and nothing to compare or rate.
+  let page = await (await site.get(url)).text();
+  assert.match(page, /<h2>Keep this page<\/h2>/);
+  assert.ok(page.includes('data-copy-text="' + site.base + url + '"') && page.includes('href="sms:?&amp;body=') && page.includes('href="mailto:?subject='));
+  assert.ok(!page.includes("compare") && !page.includes("data-print") && !page.includes('id="rating"'));
+  assert.doesNotMatch(await (await site.get(url + "?owner=1")).text(), /Keep this page/, "the owner's preview has no use for it");
+
+  // The company's form asks for the lines customers compare.
+  const form = await (await site.get("/q/" + quotes[1].token)).text();
+  for (const name of ["excludes", "start_by", "permit", "payment_terms", "warranty"]) assert.ok(form.includes('name="' + name + '"'), name);
+  mail.length = 0;
+  assert.equal((await site.form("/q/" + quotes[1].token, {
+    action: "submit", amount: "9,800", timeline: "5 working days", includes: "Remove the old fence. New vinyl fence and one gate.", warranty: "5 years on labor",
+    excludes: "Tree removal <stumps>", start_by: "The week of December 8", payment_terms: "30% to start, the rest when done", permit: "No permit is needed"
+  })).status, 303);
+  assert.equal((await site.form("/q/" + quotes[0].token, { action: "submit", amount: "6400", timeline: "About 2 weeks", includes: "New vinyl fence and one gate.", permit: "Something made up" })).status, 303);
+  assert.deepEqual(mail.map((m) => m.subject), ["A quote is in from Crown <Fence> & Gate", "A quote is in from Budget Fence LLC"]);
+  const saved = (await pool.query("select excludes, start_by, payment_terms, permit from quotes where id = $1", [quotes[1].id])).rows[0];
+  assert.deepEqual(saved, { excludes: "Tree removal <stumps>", start_by: "The week of December 8", payment_terms: "30% to start, the rest when done", permit: "No permit is needed" });
+  assert.equal((await pool.query("select permit from quotes where id = $1", [quotes[0].id])).rows[0].permit, "", "only the listed permit answers are kept");
+  assert.ok((await (await site.get("/q/" + quotes[1].token)).text()).includes('<option selected>No permit is needed</option>'));
+
+  // Each quote reads in the same order, and carries what we have on file about its company.
+  page = await (await site.get(url)).text();
+  const card = (company) => {
+    const from = page.indexOf('<p class="quote-company">' + company);
+    const next = page.indexOf('<p class="quote-company">', from + 10);
+    return page.slice(from, next > 0 ? next : page.indexOf("Each quote comes from", from));
+  };
+  const crownCard = card("Crown &lt;Fence&gt; &amp; Gate");
+  assert.deepEqual([...crownCard.matchAll(/<dt>([^<]+)<\/dt>/g)].map((m) => m[1]), ["Included", "Not included", "Timeline", "Earliest start", "Payment terms", "Permit", "Warranty"]);
+  assert.ok(crownCard.includes("Tree removal &lt;stumps&gt;") && !crownCard.includes("<stumps>"));
+  assert.match(crownCard, /<h4>Company record<\/h4>/);
+  assert.ok(crownCard.includes("Approved vendor AV-" + (1000 + crown.id) + ", since "));
+  assert.match(crownCard, /Passed our site visit on [A-Z][a-z]{2} \d{1,2}, \d{4}/);
+  assert.ok(crownCard.includes("License checked: County license where required, number CFC1429999") && crownCard.includes("Proof of liability insurance on file") && crownCard.includes("Local references checked"));
+  assert.match(crownCard, /<p class="record-shown">Shown at our visit<\/p>\s*<ul>\s*<li>In business 3 years or more<\/li>/);
+  const budgetCard = card("Budget Fence LLC");
+  assert.deepEqual([...budgetCard.matchAll(/<dt>([^<]+)<\/dt>/g)].map((m) => m[1]), ["Included", "Timeline"]);
+  assert.ok(!budgetCard.includes("UNCHECKED-1") && !budgetCard.includes("License checked"), "a license number we haven't checked is not shown");
+  assert.doesNotMatch(page, /myfloridalicense/, "a county license can't be looked up on the state's site");
+  // A trade the state licenses names that license, and points to where the customer can look it up.
+  await pool.query("update partners set trade = 'Pool' where id = $1", [crown.id]);
+  const asPool = await (await site.get(url)).text();
+  assert.ok(asPool.includes("License checked: DBPR pool contractor license, number CFC1429999"));
+  assert.match(asPool, /look up a Florida contractor&rsquo;s license yourself at <a href="https:\/\/www\.myfloridalicense\.com"/);
+  await pool.query("update partners set trade = 'Fence' where id = $1", [crown.id]);
+  assert.match(page, /<section class="app-section quote-list has-compare">/);
+  assert.match(page, /<button class="secondary" type="button" data-print>Print or save as a PDF<\/button>/);
+
+  // Two quotes: a table that lines them up.
+  const table = page.slice(page.indexOf('<table class="compare">'), page.indexOf("</table>"));
+  assert.deepEqual([...table.matchAll(/<th scope="row">([^<]+)<\/th>/g)].map((m) => m[1]),
+    ["Price", "Included", "Not included", "Timeline", "Earliest start", "Payment terms", "Permit", "Warranty", "Company record"]);
+  assert.match(table, /<th scope="col">Affordable<span>Budget Fence LLC<\/span><\/th><th scope="col">Premium<span>Crown &lt;Fence&gt; &amp; Gate<\/span><\/th>/);
+  assert.match(table, /<th scope="row">Price<\/th><td><strong>\$6,400<\/strong><\/td><td><strong>\$9,800<\/strong><\/td>/);
+  assert.match(table, /<th scope="row">Warranty<\/th><td><span class="compare-none">Not stated<\/span><\/td><td>5 years on labor<\/td>/);
+
+  // A rating is only for a customer who chose, and only once.
+  assert.equal((await site.form("/r/" + row.token + "/rating", { stars: "5", again: "yes" })).status, 303);
+  assert.equal((await pool.query("select count(*)::int as n from ratings")).rows[0].n, 0, "nothing to rate before choosing");
+  mail.length = 0;
+  assert.equal((await site.form("/r/" + row.token + "/choose", { quote: String(quotes[1].id) })).status, 303);
+  assert.deepEqual(mail.map((m) => m.subject), ["A customer chose Crown <Fence> & Gate"]);
+  page = await (await site.get(url)).text();
+  assert.match(page, /<h2>When the job is done<\/h2>/);
+  assert.doesNotMatch(page, /Keep this page/);
+  for (const wrong of [{ stars: "6", again: "yes" }, { stars: "abc", again: "yes" }, { stars: "4", again: "maybe" }, { stars: "4" }]) {
+    assert.equal((await site.form("/r/" + row.token + "/rating", wrong)).status, 303);
+  }
+  assert.equal((await pool.query("select count(*)::int as n from ratings")).rows[0].n, 0);
+  const rated = await site.form("/r/" + row.token + "/rating", { stars: "4", again: "yes", comment: "On time and tidy. <b>Would</b> call again.", may_publish: "on" });
+  assert.equal(rated.status, 303);
+  assert.match(rated.headers.get("location"), /#rating$/);
+  assert.equal((await site.form("/r/" + row.token + "/rating", { stars: "1", again: "no", comment: "changed my mind" })).status, 303);
+  const rating = (await pool.query("select * from ratings")).rows;
+  assert.equal(rating.length, 1);
+  assert.deepEqual([rating[0].stars, rating[0].again, rating[0].may_publish, rating[0].published, rating[0].quote_id], [4, true, true, false, quotes[1].id]);
+  page = await (await site.get(url)).text();
+  assert.match(page, /You gave Crown &lt;Fence&gt; &amp; Gate 4 out of 5/);
+  assert.ok(page.includes("On time and tidy. &lt;b&gt;Would&lt;/b&gt; call again.") && !page.includes('action="/r/' + row.token + '/rating"'));
+
+  // The owner reads it, and decides whether it goes on the site.
+  assert.match(await (await site.get("/admin", cookie)).text(), /<a href="\/admin\/ratings">1 new rating to read<\/a>/);
+  assert.deepEqual(await (await site.get("/api/reviews")).json(), [], "nothing is public until the owner turns it on");
+  const ratings = await (await site.get("/admin/ratings", cookie)).text();
+  assert.ok(ratings.includes("★★★★☆") && ratings.includes("Crown &lt;Fence&gt; &amp; Gate") && ratings.includes("&lt;b&gt;Would&lt;/b&gt;") && ratings.includes("The customer said you may show this."));
+  assert.doesNotMatch(await (await site.get("/admin", cookie)).text(), /new rating/, "reading the page marks it read");
+  assert.equal((await site.form("/admin/ratings/" + rating[0].id + "/published", { published: "1" }, cookie)).status, 403, "needs the form token");
+  assert.equal((await site.form("/admin/ratings/" + rating[0].id + "/published", { csrf: admin.csrf, published: "1" }, cookie)).status, 303);
+  const reviews = await (await site.get("/api/reviews")).json();
+  assert.equal(reviews.length, 1);
+  assert.deepEqual([reviews[0].stars, reviews[0].name, reviews[0].service, reviews[0].company, reviews[0].comment], [4, "Dana", "Fence", "Crown <Fence> & Gate", "On time and tidy. <b>Would</b> call again."]);
+  assert.ok(!JSON.stringify(reviews).includes("Customer") && !JSON.stringify(reviews).includes("813"), "a first name only, and no contact details");
+  assert.match(await (await site.get("/admin/partners/" + crown.id, cookie)).text(), /<h2>Customer ratings<\/h2>\s*<p class="form-note">4\.0 out of 5, from 1 job\./);
+  // A rating the customer didn't agree to share can never be shown.
+  await pool.query("update ratings set may_publish = false, published = false");
+  assert.equal((await site.form("/admin/ratings/" + rating[0].id + "/published", { csrf: admin.csrf, published: "1" }, cookie)).status, 303);
+  assert.equal((await pool.query("select published from ratings")).rows[0].published, false);
+  assert.deepEqual(await (await site.get("/api/reviews")).json(), []);
+  assert.match(await (await site.get("/admin/ratings", cookie)).text(), /didn&rsquo;t agree to show this publicly/);
+
+  // The owner can delete a request for good, as the privacy page promises. It asks first, and takes everything with it.
+  assert.match(await (await site.get("/admin/requests/" + row.id, cookie)).text(), new RegExp('href="/admin/requests/' + row.id + '/delete">Delete this request</a>'));
+  const ask = await (await site.get("/admin/requests/" + row.id + "/delete", cookie)).text();
+  assert.match(ask, /<h1[^>]*>Delete this request\?<\/h1>/);
+  assert.ok(ask.includes("2 quotes and the links sent for them") && ask.includes("The customer&rsquo;s rating") && ask.includes("The customer chose Crown &lt;Fence&gt; &amp; Gate") && ask.includes("($490)"));
+  assert.equal((await site.get("/admin/requests/" + row.id + "/delete")).status, 303, "signed out: sent to the login page");
+  assert.equal((await site.form("/admin/requests/" + row.id + "/delete", { confirm: "yes" }, cookie)).status, 403, "needs the form token");
+  assert.equal((await site.form("/admin/requests/" + row.id + "/delete", { csrf: admin.csrf }, cookie)).headers.get("location"), "/admin/requests/" + row.id, "nothing happens without the confirmation");
+  assert.equal((await pool.query("select count(*)::int as n from requests where id = $1", [row.id])).rows[0].n, 1);
+  const gone = await site.form("/admin/requests/" + row.id + "/delete", { csrf: admin.csrf, confirm: "yes" }, cookie);
+  assert.deepEqual([gone.status, gone.headers.get("location")], [303, "/admin"]);
+  for (const table of ["quotes", "ratings", "link_events", "request_files"]) {
+    assert.equal((await pool.query(`select count(*)::int as n from ${table} where request_id = $1`, [row.id])).rows[0].n, 0, table);
+  }
+  assert.equal((await pool.query("select count(*)::int as n from requests where id = $1", [row.id])).rows[0].n, 0);
+  assert.equal((await site.get(url)).status, 404, "the customer's link stops working");
+  assert.equal((await site.get("/admin/requests/" + row.id + "/delete", cookie)).status, 404);
+  assert.equal((await pool.query("select count(*)::int as n from partners where id = any($1)", [[budget.id, crown.id]])).rows[0].n, 2, "the companies stay");
 });
 
 test("repairs go to our own crew with no fee", async () => {

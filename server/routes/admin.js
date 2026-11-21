@@ -110,7 +110,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   const WALL_DOWN = "The dashboard is locked. It opens only at its own address, and only while the host\u2019s sign-in wall is on for this service (in Slipway: the service\u2019s Auth setting, Members).";
 
   const SENT_WORDS = { copied: "Copied", texted: "Texted", emailed: "Emailed", shared: "Shared" };
-  const TABS = [["/admin", "Requests", "requests"], ["/admin/partners", "Partners", "partners"], ["/admin/fees", "Fees", "fees"], ["/admin/links", "Links", "links"]];
+  const TABS = [["/admin", "Requests", "requests"], ["/admin/partners", "Partners", "partners"], ["/admin/fees", "Fees", "fees"], ["/admin/messages", "Messages", "messages"], ["/admin/links", "Links", "links"]];
 
   function adminPage(req, view) {
     return ownerPage({ tabs: TABS, signOut: !hostSignin, ...view, body: view.body.replace(/__CSRF__/g, esc(csrfToken(secret, req.session))) });
@@ -344,6 +344,10 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
         const count = toCheck.reduce((sum, row) => sum + row.files, 0);
         todo.push(`<li><a href="/admin/requests/${toCheck[0].request_id}#files">${plural(count, "document", "documents")} to check before any company sees ${count === 1 ? "it" : "them"}</a></li>`);
       }
+      const unanswered = Number((await pool.query("select count(*) from messages where not handled")).rows[0].count);
+      if (unanswered) todo.push(`<li><a href="/admin/messages">${plural(unanswered, "message", "messages")} to answer</a></li>`);
+      const unread = Number((await pool.query("select count(*) from ratings where not seen")).rows[0].count);
+      if (unread) todo.push(`<li><a href="/admin/ratings">${plural(unread, "new rating", "new ratings")} to read</a></li>`);
       if (full >= 80) todo.push(`<li>Picture storage is ${full}% full. Customers can&rsquo;t add pictures once it reaches 100%.</li>`);
 
       const rows = items.map(({ r, quotes, step }) => `<li class="owner-row${step.needsYou ? " needs-you" : ""}">
@@ -501,6 +505,7 @@ ${tiers}
         ${r.status === "chosen" ? '<button class="secondary" type="submit" name="status" value="reopen">Undo the customer’s choice</button>' : ""}
         ${r.status === "closed" ? '<button class="secondary" type="submit" name="status" value="reopen">Reopen this request</button>' : '<button class="secondary" type="submit" name="status" value="closed">Close this request</button>'}
       </form>
+      <p class="form-note">A customer asked you to remove their information? <a class="plain-link" href="/admin/requests/${r.id}/delete">Delete this request</a></p>
     </section>`
       }));
     } catch (error) {
@@ -581,6 +586,54 @@ ${tiers}
     }
   });
 
+  // Deleting a request for good, as the privacy page promises a customer who asks. One page to
+  // confirm, because it takes the quotes, files, link history, and rating with it.
+  router.get("/requests/:id/delete", async (req, res, next) => {
+    try {
+      const r = (await pool.query("select * from requests where id = $1", [Number(req.params.id) || 0])).rows[0];
+      if (!r) return next();
+      const count = async (table) => (await pool.query(`select count(*)::int as n from ${table} where request_id = $1`, [r.id])).rows[0].n;
+      const [quotes, files, ratings] = [await count("quotes"), await count("request_files"), await count("ratings")];
+      const chosen = r.chosen_quote_id
+        ? (await pool.query("select p.company, q.amount_cents, q.fee_percent from quotes q join partners p on p.id = q.partner_id where q.id = $1", [r.chosen_quote_id])).rows[0]
+        : null;
+      res.send(adminPage(req, {
+        current: "requests", back: { href: "/admin/requests/" + r.id, label: "Back to the request" },
+        title: "Delete " + requestRef(r.id), heading: "Delete this request?",
+        intro: requestRef(r.id) + ", " + r.service.toLowerCase() + " for " + r.name + ". This can’t be undone.",
+        body: `    <section class="app-section">
+      <h2>What goes</h2>
+      <ul class="scope">
+        <li>The request, with the customer&rsquo;s name, phone number, and email</li>
+        <li>${plural(quotes, "quote", "quotes")} and the links sent for them</li>
+        <li>${plural(files, "picture or file", "pictures and files")}</li>
+        ${ratings ? "<li>The customer&rsquo;s rating</li>" : ""}
+      </ul>
+      ${chosen ? `<p class="form-error">The customer chose ${esc(chosen.company)} for this job. Its finder&rsquo;s fee record (${esc(formatDollars(Math.round(chosen.amount_cents * chosen.fee_percent / 100)))}) goes too. If you still need that for your books, write it down first.</p>` : ""}
+      <form method="post" action="/admin/requests/${r.id}/delete" class="done-actions">
+        ${csrfField}
+        <button class="primary" type="submit" name="confirm" value="yes">Delete it for good</button>
+        <a class="secondary" href="/admin/requests/${r.id}">Keep it</a>
+      </form>
+    </section>`
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/requests/:id/delete", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id) || 0;
+      if (req.body.confirm !== "yes") return res.redirect(303, "/admin/requests/" + id);
+      // Quotes, files, link history, and the rating go with it (on delete cascade).
+      await pool.query("delete from requests where id = $1", [id]);
+      res.redirect(303, "/admin");
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/requests/:id/status", async (req, res, next) => {
     try {
       const id = Number(req.params.id) || 0;
@@ -635,7 +688,7 @@ ${list.map(row).join("\n")}
         title: "Partners",
         heading: "Partners",
         intro: "Your approved vendor list, and the companies working toward it. Only an approved company can be sent a job brief.",
-        body: `    <p class="owner-actions owner-sheet-links"><a class="primary" href="/admin/partners/new">Add a partner</a> <a class="secondary" href="/admin/standard">Your standard</a> <a class="secondary" href="/admin/approved.xlsx">Download the approved list for Excel</a></p>
+        body: `    <p class="owner-actions owner-sheet-links"><a class="primary" href="/admin/partners/new">Add a partner</a> <a class="secondary" href="/admin/standard">Your standard</a> <a class="secondary" href="/admin/ratings">Customer ratings</a> <a class="secondary" href="/admin/approved.xlsx">Download the approved list for Excel</a></p>
 ${group("Approved vendors", vendors.filter((p) => p.status === "verified"), "No approved vendors yet. A company is approved after its paperwork checks and a site visit that meets your standard.")}
 ${group("Working toward approval", vendors.filter((p) => p.status === "applied"))}
 ${group("Paused", vendors.filter((p) => p.status === "paused"))}
@@ -861,12 +914,20 @@ ${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
   async function partnerPage(req, p, { error = "", form = null, shown = null, visitError = "" } = {}) {
     const ownCrew = p.trade === OWN_CREW_SERVICE;
     const standard = ownCrew ? null : await loadStandard(pool);
+    const rated = (await pool.query(
+      "select count(*)::int as jobs, round(avg(g.stars), 1) as average from ratings g join quotes q on q.id = g.quote_id where q.partner_id = $1", [p.id]
+    )).rows[0];
     const alert = visitError ? `    <p class="form-error page-alert" role="alert">${esc(visitError)} <a href="#visit">Go to the site visit</a></p>\n`
       : (ownCrew ? "" : `    <p class="owner-actions"><a class="secondary" href="#visit">Go to the site visit</a></p>\n`);
     return adminPage(req, {
       ...PARTNER_PAGE, title: p.company, heading: p.company,
       intro: "Added " + formatDate(p.created_at) + ". " + STATUS_LABELS[p.status] + ".",
       body: alert + partnerForm(form ? { ...p, ...form } : p, "/admin/partners/" + p.id, error)
+        + (rated.jobs ? `
+    <section class="app-section owner-after">
+      <h2>Customer ratings</h2>
+      <p class="form-note">${esc(rated.average)} out of 5, from ${plural(rated.jobs, "job", "jobs")}. <a class="plain-link" href="/admin/ratings">Read them</a></p>
+    </section>` : "")
         + (ownCrew ? "" : visitSection(p, standard, { shown, error: visitError }))
     });
   }
@@ -1030,6 +1091,7 @@ ${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
       <section class="form-part">
         <h2>What you score at a visit</h2>
         <p class="form-note">A company has to meet every &ldquo;Must meet&rdquo; item to be approved. Items worth points add up to suggest its tier. To remove an item, clear its words. Add new ones in the empty rows at the end.</p>
+        <p class="form-note"><strong>Customers can read these items.</strong> Your site&rsquo;s <a class="plain-link" href="${esc(config.publicUrl)}/standard">Our standard</a> page lists them in your words, and a quote shows the points items its company earned. The points and the numbers for each tier stay private.</p>
         <ol class="standard-list">
         ${rows}
         </ol>
@@ -1119,6 +1181,91 @@ ${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
         "Content-Length": String(file.length)
       });
       res.send(file);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // What customers said after their jobs. Opening the page marks them as read.
+  router.get("/ratings", async (req, res, next) => {
+    try {
+      const ratings = (await pool.query(
+        `select g.*, r.name, r.service, r.id as request_id, p.company, p.id as partner_id
+           from ratings g join requests r on r.id = g.request_id join quotes q on q.id = g.quote_id join partners p on p.id = q.partner_id
+          order by g.created_at desc limit 200`
+      )).rows;
+      await pool.query("update ratings set seen = true where not seen");
+      const stars = (n) => "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n);
+      res.send(adminPage(req, {
+        ...PARTNER_PAGE, title: "Customer ratings", heading: "Customer ratings",
+        intro: "What customers said after the job. A rating shows on your site only when the customer allowed it and you turn it on.",
+        body: ratings.length ? `    <ul class="message-list">
+${ratings.map((g) => `      <li class="message${g.seen ? "" : " needs-you"}">
+        <p class="message-from"><strong><span role="img" aria-label="${g.stars} out of 5 stars">${stars(g.stars)}</span></strong> <a href="/admin/partners/${g.partner_id}">${esc(g.company)}</a></p>
+        <p class="message-when">${esc(String(g.name).trim().split(/\s+/)[0])}, <a href="/admin/requests/${g.request_id}">${esc(requestRef(g.request_id))}</a>, ${esc(g.service)}, ${esc(formatDate(g.created_at))}. Would hire them again: ${g.again ? "yes" : "no"}.</p>
+        ${g.comment ? `<p class="message-body">${esc(g.comment)}</p>` : ""}
+        ${g.may_publish ? `<form method="post" action="/admin/ratings/${g.id}/published">
+          ${csrfField}
+          <p class="message-when">${g.published ? "Showing on your home page." : "The customer said you may show this."}</p>
+          <button class="text-button" type="submit" name="published" value="${g.published ? "0" : "1"}">${g.published ? "Stop showing it" : "Show it on the site"}</button>
+        </form>` : '<p class="message-when">The customer didn&rsquo;t agree to show this publicly.</p>'}
+      </li>`).join("\n")}
+    </ul>` : '    <p class="owner-empty">No ratings yet. After a customer chooses a company, their private page asks how the job went.</p>'
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/ratings/:id/published", async (req, res, next) => {
+    try {
+      // Only a rating the customer agreed to share can ever be shown.
+      await pool.query("update ratings set published = $1 where id = $2 and may_publish", [req.body.published === "1", Number(req.params.id) || 0]);
+      res.redirect(303, "/admin/ratings");
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Messages from the contact page, newest first. A phone number or an email address becomes a link.
+  router.get("/messages", async (req, res, next) => {
+    try {
+      const messages = (await pool.query("select * from messages order by handled, created_at desc limit 200")).rows;
+      const reach = (value) => {
+        if (/^\S+@\S+\.\S+$/.test(value)) return `<a href="mailto:${esc(value)}">${esc(value)}</a>`;
+        const callTo = dial(value);
+        return callTo ? `<a href="tel:${esc(callTo)}">${esc(value)}</a>` : esc(value);
+      };
+      res.send(adminPage(req, {
+        current: "messages",
+        title: "Messages",
+        heading: "Messages",
+        intro: "What people send from the contact page on your site.",
+        body: messages.length ? `    <ul class="message-list">
+${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}">
+        <p class="message-from"><strong>${esc(m.name)}</strong> ${reach(m.reach)}</p>
+        <p class="message-when">${esc(formatDateTime(m.created_at))}${m.handled ? ". Answered." : ""}</p>
+        <p class="message-body">${esc(m.body)}</p>
+        <form method="post" action="/admin/messages/${m.id}/handled">
+          ${csrfField}
+          <button class="text-button" type="submit" name="handled" value="${m.handled ? "0" : "1"}">${m.handled ? "Mark as not answered" : "Mark as answered"}</button>
+          ${m.handled ? '<button class="text-button" type="submit" name="handled" value="delete">Delete it</button>' : ""}
+        </form>
+      </li>`).join("\n")}
+    </ul>` : '    <p class="owner-empty">No messages yet. They appear here when someone uses the contact page.</p>'
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/messages/:id/handled", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id) || 0;
+      // Only a message already marked as answered offers the delete button, and only one can be deleted.
+      if (req.body.handled === "delete") await pool.query("delete from messages where id = $1 and handled", [id]);
+      else await pool.query("update messages set handled = $1 where id = $2", [req.body.handled === "1", id]);
+      res.redirect(303, "/admin/messages");
     } catch (error) {
       next(error);
     }
