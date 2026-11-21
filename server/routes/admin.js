@@ -3,7 +3,8 @@ const { esc, page, ownerPage, certificatePage, briefHtml, formatDate, formatDate
 const { SEND_EVENTS, requestRef, customerPath, companyPath, loadActivity } = require("../lib/links");
 const { workbook } = require("../lib/xlsx");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
-const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
+const { SERVICES, SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
+const { loadOff, saveLive } = require("../lib/services");
 const { SHARING, LIMITS, megabytes, fileSize, listFiles, loadFile, storageUsed, sendFile, galleryHtml } = require("../lib/files");
 const {
   MAX_LABEL, MAX_POINTS, loadStandard, saveStandard, standardFromForm, possiblePoints, itemKey, metFromForm, scoreVisit,
@@ -110,7 +111,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
   const WALL_DOWN = "The dashboard is locked. It opens only at its own address, and only while the host\u2019s sign-in wall is on for this service (in Slipway: the service\u2019s Auth setting, Members).";
 
   const SENT_WORDS = { copied: "Copied", texted: "Texted", emailed: "Emailed", shared: "Shared" };
-  const TABS = [["/admin", "Requests", "requests"], ["/admin/partners", "Partners", "partners"], ["/admin/fees", "Fees", "fees"], ["/admin/messages", "Messages", "messages"], ["/admin/links", "Links", "links"]];
+  const TABS = [["/admin", "Requests", "requests"], ["/admin/partners", "Partners", "partners"], ["/admin/services", "Services", "services"], ["/admin/fees", "Fees", "fees"], ["/admin/messages", "Messages", "messages"], ["/admin/links", "Links", "links"]];
 
   function adminPage(req, view) {
     return ownerPage({ tabs: TABS, signOut: !hostSignin, ...view, body: view.body.replace(/__CSRF__/g, esc(csrfToken(secret, req.session))) });
@@ -1120,6 +1121,110 @@ ${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
     ...PARTNER_PAGE, title: "Your standard", heading: "Your standard",
     intro: "What a company has to show you at a site visit to earn your certification and a place on the approved vendor list."
   };
+
+  // Services: which ones the website offers. One switch each, beside the approved companies it has.
+  const SERVICES_PAGE = {
+    current: "services", title: "Services", heading: "Services",
+    intro: "Choose which services your website offers. Each one shows how many approved companies you have for it."
+  };
+
+  async function servicesBody(req, { saved = false, error = "", ticked = null } = {}) {
+    const off = await loadOff(pool);
+    const isOn = (name) => (ticked ? ticked.includes(name) : !off.includes(name));
+    const partners = (await pool.query(
+      "select trade, tier, status, count(*)::int as n from partners where status in ('verified', 'applied') group by trade, tier, status"
+    )).rows;
+    const approved = (name, tier) => partners.filter((row) => row.status === "verified" && row.trade === name && row.tier === tier).reduce((sum, row) => sum + row.n, 0);
+    const applying = (name) => partners.filter((row) => row.status === "applied" && row.trade === name).reduce((sum, row) => sum + row.n, 0);
+    // A service needs partner companies unless the owner's crew does it, or it is the catch-all.
+    const needsPartners = (name) => name !== OWN_CREW_SERVICE && name !== "Something else";
+    const covered = (name) => TIERS.filter((tier) => approved(name, tier) > 0).length;
+
+    const row = (service, index) => {
+      const name = service.name;
+      let cover;
+      if (name === OWN_CREW_SERVICE) {
+        cover = '<p class="service-cover"><span class="pill pill-ready">Your crew</span> No partner company needed.</p>';
+      } else if (name === "Something else") {
+        cover = '<p class="service-cover">For jobs that don&rsquo;t fit the list. You choose which company to invite.</p>';
+      } else {
+        const tiers = covered(name);
+        const pillHtml = tiers === TIERS.length ? '<span class="pill pill-ready">All 3 tiers</span>'
+          : tiers ? `<span class="pill pill-part">${tiers} of 3 tiers</span>`
+          : '<span class="pill pill-none">No companies yet</span>';
+        const waiting = applying(name);
+        // The count for each tier, once there is anything to count.
+        const counts = tiers ? TIERS.map((tier) => esc(tier) + " " + approved(name, tier)).join(", ") : "";
+        const toward = waiting ? plural(waiting, "company", "companies") + " working toward approval" : "";
+        cover = `<p class="service-cover">${pillHtml} ${[counts, toward].filter(Boolean).join(". ")}</p>
+          ${tiers ? "" : '<p class="service-warn">On your website with no approved company to quote it.</p>'}`;
+      }
+      return `<li class="service-row">
+          <label class="switch" for="live-${index}">
+            <span class="switch-name">${esc(name)}</span>
+            <input id="live-${index}" type="checkbox" role="switch" name="live" value="${esc(name)}"${isOn(name) ? " checked" : ""}>
+            <span class="switch-state" aria-hidden="true"></span>
+          </label>
+          ${cover}
+        </li>`;
+    };
+    const groups = [];
+    SERVICES.forEach((service, index) => {
+      let group = groups.find((item) => item.title === service.group);
+      if (!group) groups.push(group = { title: service.group, rows: [] });
+      group.rows.push(row(service, index));
+    });
+
+    const on = SERVICE_NAMES.filter((name) => !off.includes(name));
+    const bare = on.filter((name) => needsPartners(name) && covered(name) === 0);
+    const partTiers = on.filter((name) => needsPartners(name) && covered(name) > 0 && covered(name) < TIERS.length);
+    const summary = `${on.length} of ${SERVICE_NAMES.length} services ${on.length === 1 ? "is" : "are"} on your website.`
+      + (bare.length ? ` ${bare.length} of them ${bare.length === 1 ? "has" : "have"} no approved company yet.` : "")
+      + (partTiers.length ? ` ${partTiers.length} ${partTiers.length === 1 ? "is" : "are"} missing a tier.` : "")
+      + (!bare.length && !partTiers.length ? " Each one has a company in every tier it needs." : "");
+
+    return `    ${saved ? `<p class="visit-result" role="status"><strong>Saved.</strong> Your website now offers ${plural(on.length, "service", "services")}. The change is live now. <a class="plain-link" href="${esc(siteUrl(req))}/#services">See the home page</a></p>` : ""}
+    ${error ? `<p class="form-error" role="alert">${esc(error)}</p>` : ""}
+    <p class="owner-next${bare.length ? " needs-you" : ""}">${esc(summary)}</p>
+    <form method="post" action="/admin/services" class="service-switches">
+      ${csrfField}
+${groups.map((group) => `      <section class="app-section">
+        <h2>${esc(group.title)}</h2>
+        <ul class="service-rows">
+        ${group.rows.join("\n        ")}
+        </ul>
+      </section>`).join("\n")}
+      <div class="save-bar">
+        <button class="primary" type="submit">Save changes</button>
+      </div>
+    </form>
+    <section class="app-section owner-after">
+      <h2>What a switch does</h2>
+      <ul class="scope">
+        <li>Off takes the service off the home page and the request form as soon as you save. A request for it is turned away.</li>
+        <li>Requests already in keep going. Nothing about them changes.</li>
+        <li>Companies can still apply for a service that is off, so you can sign up all three tiers first and then turn it on.</li>
+      </ul>
+    </section>`;
+  }
+
+  router.get("/services", async (req, res, next) => {
+    try {
+      res.send(adminPage(req, { ...SERVICES_PAGE, body: await servicesBody(req, { saved: req.query.saved === "1" }) }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/services", async (req, res, next) => {
+    try {
+      const { problem } = await saveLive(pool, req.body.live);
+      if (problem) return res.status(400).send(adminPage(req, { ...SERVICES_PAGE, body: await servicesBody(req, { error: problem, ticked: [] }) }));
+      res.redirect(303, "/admin/services?saved=1");
+    } catch (error) {
+      next(error);
+    }
+  });
 
   router.get("/standard", async (req, res, next) => {
     try {

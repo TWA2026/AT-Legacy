@@ -23,6 +23,7 @@ Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "O
 | --- | --- |
 | Requests | What needs the owner, then every request with its next step. Requests that need a company come first |
 | Partners | The approved vendor list, the companies working toward it, the standard, and the sign-up link to send to a new company |
+| Services | A switch for each service, beside how many approved companies it has in each tier. Off takes the service off the website |
 | Fees | One row per awarded job: the fee, the final total, and whether it's paid |
 | Messages | What people send from the Contact page, newest first, with a tap to call or email back |
 | Links | Every fixed page of the site with its address, and who each one is for |
@@ -82,6 +83,15 @@ An approved company has a certificate number, such as AV-1004, and a printable c
 
 A later visit that meets the standard renews the approval and sets the tier again. Pausing a company takes it off the list and keeps its dates. Moving it back to Applied withdraws the certification.
 
+### Services: on and off
+
+The Services tab decides which services the website offers. Each row shows the approved companies the service has, tier by tier, and how many more are working toward approval. Saving takes effect on the next page view: the home page and the request form ask the hub which services are off (`/api/services`) and take those away, and a link that asked for one says the service isn't being taken right now.
+
+- Every service is on until it is turned off. At least one has to stay on.
+- Requests already in are not touched.
+- The For companies page still lists every service, so a company can apply for one that is off. That is how a service gets its three tiers before it goes live.
+- The home page's top drawing uses a fence job as its example whichever services are on.
+
 ### Business details: one file
 
 `business.json` holds the phone number, the owner's name and role, the About paragraphs, the hours, the reply-time promise, and the email address. Every public page reads from it, both on the hub and in the static build. A detail left empty takes its sentence or section off the page, so nothing shows half filled.
@@ -117,6 +127,7 @@ The certification is AT Legacy Services' own. The certificate and the For compan
 - A partner can be approved only after the registration, insurance, and references checks are ticked, plus the license check when the trade needs one (`server/lib/catalog.js`), and after a site visit that meets every must-meet item of the standard. The owner's own crew is exempt.
 - A scorecard's boxes are named after each item's wording, not its place in the list, so a scorecard opened before the standard changed can't tick the wrong item.
 - Each quote is in the partner's name. The site never sets a price.
+- A service the owner has switched off takes no new request, even from a page that was opened before the switch.
 - A rating is taken only for a request whose customer chose a company, and only once. It is public only when the customer agreed and the owner turned it on.
 - A contact message needs a name, a phone number or an email, and a message. Ten tries an hour from one connection.
 - The AI sees the job description only, never the customer's name, phone, or email. Any AI failure falls back to the plain brief.
@@ -241,6 +252,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `server/lib/edge.js` | Checks the host's sign-in wall before the dashboard service opens |
 | `server/lib/links.js` | Names for private links, and the record of when each was sent and opened |
 | `server/lib/files.js` | Pictures and files: the limits, what may be stored, cleaning a picture, and who may see each file |
+| `server/lib/services.js` | Which services are switched off, and the rule that one stays on |
 | `server/lib/standard.js` | The certification standard: its starting draft, how a site visit is scored, and the tier the points suggest |
 | `server/lib/xlsx.js` | Writes the Excel downloads |
 | `server/lib/stamp.js` | Adds a fingerprint to each page's links to the stylesheet and scripts |

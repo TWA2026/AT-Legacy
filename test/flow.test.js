@@ -1782,6 +1782,88 @@ test("a quote line by line: the company record, the side-by-side table, the link
   assert.equal((await pool.query("select count(*)::int as n from partners where id = any($1)", [[budget.id, crown.id]])).rows[0].n, 2, "the companies stay");
 });
 
+test("services: the owner switches each one on or off, and the site follows", async () => {
+  const site = await start();
+  const admin = await login(site);
+  const cookie = { cookie: admin.cookie };
+  const { SERVICE_NAMES } = require("../server/lib/catalog");
+  const save = (...names) => site.form("/admin/services", [["csrf", admin.csrf], ...names.map((name) => ["live", name])], cookie);
+  const rowOf = (page, name) => page.slice(page.indexOf('value="' + name + '"'), page.indexOf("</li>", page.indexOf('value="' + name + '"')));
+  const mowing = { ...JOB, ...CONTACT, service: "Lawn mowing", tiers: ["Affordable"] };
+  try {
+    // To start, every service is on.
+    assert.deepEqual(await (await site.get("/api/services")).json(), { off: [] });
+    let page = await (await site.get("/admin/services", cookie)).text();
+    assert.match(page, /<a href="\/admin\/services" aria-current="page">Services<\/a>/);
+    assert.equal((page.match(/role="switch" name="live"/g) || []).length, 12);
+    assert.equal((page.match(/role="switch" name="live" value="[^"]+" checked>/g) || []).length, 12);
+    assert.match(page, /12 of 12 services are on your website\./);
+    assert.equal((await site.get("/admin/services")).status, 303, "signed out: sent to the login page");
+    assert.equal((await site.form("/admin/services", { live: "Pool" }, cookie)).status, 403, "needs the form token");
+    assert.deepEqual(await (await site.get("/api/services")).json(), { off: [] });
+
+    // Each row says how many approved companies the service has, tier by tier.
+    assert.match(rowOf(page, "Lawn mowing"), /<span class="pill pill-none">No companies yet<\/span> <\/p>\s*<p class="service-warn">/);
+    assert.match(rowOf(page, "Home repairs and upkeep"), /Your crew<\/span> No partner company needed\./);
+    assert.ok(!rowOf(page, "Something else").includes("pill") && !rowOf(page, "Home repairs and upkeep").includes("service-warn"));
+    await addVerifiedPartner(site, admin, "Switch Mowing Co", "Premium", "Lawn mowing");
+    await site.form("/admin/partners", { csrf: admin.csrf, company: "Not Yet Mowing", contact_name: "A", trade: "Lawn mowing", tier: "Affordable", status: "applied" }, cookie);
+    page = await (await site.get("/admin/services", cookie)).text();
+    assert.match(rowOf(page, "Lawn mowing"), /<span class="pill pill-part">1 of 3 tiers<\/span> Affordable 0, Mid-range 0, Premium 1\. 1 company working toward approval<\/p>/);
+    assert.ok(!rowOf(page, "Lawn mowing").includes("service-warn"));
+    for (const tier of ["Affordable", "Mid-range"]) await addVerifiedPartner(site, admin, "Switch Mowing " + tier, tier, "Lawn mowing");
+    assert.match(rowOf(await (await site.get("/admin/services", cookie)).text(), "Lawn mowing"), /<span class="pill pill-ready">All 3 tiers<\/span> Affordable 1, Mid-range 1, Premium 1\./);
+
+    // Turn two off. The public answer lists them, in the catalog's order.
+    const saved = await save(...SERVICE_NAMES.filter((name) => name !== "Lawn mowing" && name !== "Pool"));
+    assert.deepEqual([saved.status, saved.headers.get("location")], [303, "/admin/services?saved=1"]);
+    const answer = await site.get("/api/services");
+    assert.deepEqual(await answer.json(), { off: ["Pool", "Lawn mowing"] });
+    assert.equal(answer.headers.get("cache-control"), "no-cache", "a switch shows on the next page view");
+    page = await (await site.get("/admin/services?saved=1", cookie)).text();
+    assert.match(page, /<strong>Saved\.<\/strong> Your website now offers 10 services\. The change is live now\. <a class="plain-link" href="https:\/\/example\.test\/#services">See the home page<\/a>/);
+    assert.match(page, /10 of 12 services are on your website\./);
+    assert.ok(rowOf(page, "Pool").startsWith('value="Pool">') && rowOf(page, "Fence").startsWith('value="Fence" checked>'));
+
+    // A service that is off takes no new request, even from a page that still lists it.
+    for (const path of ["/api/brief", "/api/requests"]) {
+      const refused = await site.json(path, mowing);
+      assert.equal(refused.status, 400, path);
+      assert.match((await refused.json()).error, /We aren’t taking requests for this service right now\./);
+    }
+    assert.equal((await pool.query("select count(*)::int as n from requests where service = 'Lawn mowing'")).rows[0].n, 0);
+    assert.equal((await site.json("/api/requests", { ...mowing, service: "House cleaning" })).status, 201, "a service that is on still works");
+    // Companies can still apply for it. That is how it gets enough of them to turn on.
+    assert.equal((await site.json("/api/partners", {
+      company: "Pool Hopeful LLC", trade: "Pool", tier: "Premium", years: "4", license: "CPC1450000", insured: "Yes, I can send proof",
+      areas: "Lutz", website: "", name: "Pat Owner", phone: "813-555-0143", email: "pat@example.test"
+    })).status, 201);
+
+    // The public pages carry what the switch needs: a place for the note, and the script that reads the answer.
+    assert.match(await (await site.get("/quote")).text(), /<p class="form-note" id="service-note" role="status" hidden>We aren&rsquo;t taking requests for that service right now\./);
+    assert.match(await (await site.get("/quote.js")).text(), /\/api\/services/);
+    assert.match(await (await site.get("/home.js")).text(), /\/api\/services/);
+
+    // At least one stays on. Names it doesn't know are ignored. One name alone works.
+    const none = await save();
+    assert.equal(none.status, 400);
+    assert.match(await none.text(), /<p class="form-error" role="alert">Keep at least one service on\./);
+    assert.deepEqual((await (await site.get("/api/services")).json()).off, ["Pool", "Lawn mowing"], "a refused save changes nothing");
+    assert.equal((await save("Not a service")).status, 400);
+    assert.equal((await save("Fence", "Not a service")).status, 303);
+    assert.deepEqual((await (await site.get("/api/services")).json()).off, SERVICE_NAMES.filter((name) => name !== "Fence"));
+    assert.match(await (await site.get("/admin/services", cookie)).text(), /1 of 12 services is on your website\./);
+
+    // Back on: requests are taken again.
+    assert.equal((await save(...SERVICE_NAMES)).status, 303);
+    assert.deepEqual(await (await site.get("/api/services")).json(), { off: [] });
+    assert.equal((await site.json("/api/requests", mowing)).status, 201);
+  } finally {
+    // Later tests expect every service to be on.
+    await pool.query("delete from settings where key = 'services_off'");
+  }
+});
+
 test("repairs go to our own crew with no fee", async () => {
   const site = await start();
   const admin = await login(site);

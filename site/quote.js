@@ -90,7 +90,9 @@
     serviceInfoBox.hidden = !shown;
   }
 
+  var serviceNote = document.getElementById("service-note");
   form.elements.service.addEventListener("change", function () {
+    serviceNote.hidden = true;
     showTiers();
     showServiceInfo();
     showCoverage();
@@ -103,6 +105,30 @@
   }).then(function (data) {
     coverage = data;
     showCoverage();
+  }).catch(function () {});
+
+  // Services the owner has switched off in the dashboard come out of the list.
+  // A link that asked for one of them gets a line saying so.
+  fetch(api + "/api/services").then(function (response) {
+    return response.ok ? response.json() : null;
+  }).then(function (data) {
+    var off = data && Array.isArray(data.off) ? data.off : [];
+    if (!off.length) return;
+    var select = form.elements.service;
+    var asked = off.indexOf(select.value) !== -1 || off.indexOf(requested) !== -1;
+    Array.prototype.slice.call(select.options).forEach(function (option) {
+      if (off.indexOf(option.text) !== -1) option.parentNode.removeChild(option);
+    });
+    Array.prototype.slice.call(select.querySelectorAll("optgroup")).forEach(function (group) {
+      if (!group.children.length) select.removeChild(group);
+    });
+    if (asked) {
+      select.value = "";
+      serviceNote.hidden = false;
+      showTiers();
+      showServiceInfo();
+      showCoverage();
+    }
   }).catch(function () {});
 
   form.addEventListener("input", function () {

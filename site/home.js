@@ -33,6 +33,39 @@
 })();
 
 // Customer ratings. The section stays hidden until there is at least one the customer agreed to share.
+// Services the owner has switched off in the dashboard come off the page.
+(function () {
+  var section = document.getElementById("services");
+  if (!section || !window.fetch) return;
+  var api = String(window.ATL_API || "").replace(/\/+$/, "");
+  fetch(api + "/api/services").then(function (response) {
+    return response.ok ? response.json() : null;
+  }).then(function (data) {
+    var off = data && Array.isArray(data.off) ? data.off : [];
+    if (!off.length) return;
+    var anyShown = false;
+    Array.prototype.forEach.call(section.querySelectorAll(".cats > div"), function (group) {
+      var shown = 0;
+      Array.prototype.forEach.call(group.querySelectorAll("li"), function (item) {
+        var link = item.querySelector("a");
+        var query = link ? link.getAttribute("href").split("?")[1] || "" : "";
+        var name = new URLSearchParams(query).get("service");
+        item.hidden = off.indexOf(name) !== -1;
+        if (!item.hidden) shown += 1;
+      });
+      group.hidden = !shown;
+      if (shown) anyShown = true;
+    });
+    // With every listed service off, the section and the links that jump to it go too.
+    if (!anyShown) {
+      section.hidden = true;
+      Array.prototype.forEach.call(document.querySelectorAll('a[href="#services"]'), function (link) {
+        link.hidden = true;
+      });
+    }
+  }).catch(function () {});
+})();
+
 (function () {
   var section = document.getElementById("reviews");
   if (!section || !window.fetch) return;

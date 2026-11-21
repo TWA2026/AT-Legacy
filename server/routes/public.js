@@ -6,6 +6,7 @@ const { buildBrief, plainBrief } = require("../lib/brief");
 const { newToken, sign, safeEqual, rateLimiter } = require("../lib/security");
 const { BODY_LIMIT, FileError, saveFile } = require("../lib/files");
 const { loadStandard } = require("../lib/standard");
+const { loadOff } = require("../lib/services");
 
 const PROPERTIES = ["My home", "My rental property", "Other"];
 const TIMINGS = ["As soon as possible", "Within a month", "In 1 to 3 months", "I’m flexible"];
@@ -38,6 +39,13 @@ function briefSignature(secret, brief) {
 
 module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify }) {
   const router = express.Router();
+  // A service the owner has switched off takes no new requests, whatever page the visitor still has open.
+  async function mustBeOffered(service) {
+    if ((await loadOff(pool)).includes(service)) {
+      throw new InputError("We aren’t taking requests for this service right now. Choose another service, or send us a message from the Contact page.");
+    }
+  }
+
   const briefLimit = rateLimiter({ limit: 20, windowMs: 3600 * 1000 });
   const requestLimit = rateLimiter({ limit: 10, windowMs: 3600 * 1000 });
   const partnerLimit = rateLimiter({ limit: 5, windowMs: 3600 * 1000 });
@@ -60,6 +68,7 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
   router.post("/brief", guard(briefLimit), async (req, res, next) => {
     try {
       const job = readJob(req.body || {});
+      await mustBeOffered(job.service);
       const useAi = Boolean(config.anthropicKey) && aiDailyBudget("all");
       const brief = await buildBrief(job, { apiKey: useAi ? config.anthropicKey : "", model: config.aiModel, fetchImpl });
       res.json({ brief, signature: briefSignature(secret, brief) });
@@ -75,6 +84,7 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
       if (body.company_url) return res.json({ url: "/" });
 
       const job = readJob(body);
+      await mustBeOffered(job.service);
       const name = text(body, "name", { max: 80, label: "Name" });
       const phone = text(body, "phone", { max: 30, label: "Phone" });
       const contact = oneOf(body, "contact", CONTACT_METHODS, "Contact method");
@@ -148,6 +158,16 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
       const coverage = {};
       for (const name of SERVICE_NAMES) coverage[name] = name === OWN_CREW_SERVICE ? TIERS.slice() : TIERS.filter((tier) => rows.some((row) => row.trade === name && row.tier === tier));
       res.set("Cache-Control", "public, max-age=60").json(coverage);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The services the owner has switched off. The home page and the request form take them away.
+  // Never served from a browser's cache, so a switch shows on the next page view.
+  router.get("/services", async (req, res, next) => {
+    try {
+      res.set("Cache-Control", "no-cache").json({ off: await loadOff(pool) });
     } catch (error) {
       next(error);
     }
