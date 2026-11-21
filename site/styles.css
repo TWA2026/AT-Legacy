@@ -533,6 +533,15 @@ html {
   color: var(--gold);
 }
 
+/* The dimmed dollar signs are drawn, not written, so the page's own text says $, $$, or $$$. */
+.marks i {
+  font-style: normal;
+}
+
+.marks i::after {
+  content: attr(data-rest);
+}
+
 .sheet .marks {
   color: rgba(19, 40, 58, 0.26);
 }
@@ -1563,7 +1572,15 @@ html {
 .foot-nav {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 28px;
+  gap: 0 28px;
+}
+
+/* Footer links are 44 px tall, so a thumb lands on the one it meant. */
+.foot-nav a,
+.foot-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 
 .legal {
@@ -3257,7 +3274,7 @@ html {
 .foot-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 22px;
+  gap: 0 22px;
   margin-bottom: 14px;
 }
 
@@ -3863,5 +3880,73 @@ html {
 @media (min-width: 700px) {
   .numbers {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* A note on the request form that changes what the visitor can ask for. It stands apart from ordinary help text. */
+.form-flag {
+  padding: 2px 0 2px 14px;
+  border-left: 4px solid var(--gold);
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.form-flag a {
+  color: inherit;
+}
+
+/* Our standard: the basics and the higher-tier items as two sheets, side by side on a wide screen. */
+.standard-part {
+  max-width: none;
+}
+
+.standard-part > h2,
+.standard-part > p {
+  max-width: 44rem;
+}
+
+.standard-lists {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  max-width: 1040px;
+  margin-top: 6px;
+}
+
+.standard-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 14px;
+  padding: 22px 20px 24px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-top: 6px solid var(--navy);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.standard-card:first-child {
+  border-top-color: var(--gold);
+}
+
+.standard-card h3,
+.standard-card p,
+.standard-card ul {
+  margin: 0;
+}
+
+.standard-card p {
+  color: var(--slate);
+}
+
+@media (min-width: 900px) {
+  .standard-lists {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 24px;
+  }
+
+  .standard-card {
+    padding: 30px 28px 32px;
   }
 }

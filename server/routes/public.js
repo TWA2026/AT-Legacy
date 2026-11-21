@@ -5,7 +5,7 @@ const { SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER } = require("../li
 const { buildBrief, plainBrief } = require("../lib/brief");
 const { newToken, sign, safeEqual, rateLimiter } = require("../lib/security");
 const { BODY_LIMIT, FileError, saveFile } = require("../lib/files");
-const { loadStandard } = require("../lib/standard");
+const { loadStandard, shownStandard } = require("../lib/standard");
 const { loadOff } = require("../lib/services");
 const { certificateNo } = require("../lib/standard");
 const { formatDay } = require("../lib/html");
@@ -180,12 +180,7 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
   // The wording is the owner's. Points and the numbers each tier needs stay private.
   router.get("/standard", async (req, res, next) => {
     try {
-      const standard = await loadStandard(pool);
-      res.set("Cache-Control", "public, max-age=60").json({
-        must: standard.items.filter((item) => item.kind === "must").map((item) => item.label),
-        more: standard.items.filter((item) => item.kind === "points").map((item) => item.label),
-        months: standard.reviewMonths
-      });
+      res.set("Cache-Control", "public, max-age=60").json(shownStandard(await loadStandard(pool)));
     } catch (error) {
       next(error);
     }

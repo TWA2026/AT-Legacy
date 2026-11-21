@@ -92,6 +92,14 @@ The Services tab decides which services the website offers. Each row shows the a
 - The For companies page still lists every service, so a company can apply for one that is off. That is how a service gets its three tiers before it goes live.
 - The home page's top drawing uses a fence job as its example whichever services are on.
 
+### Pages that read without JavaScript
+
+A search engine, an AI assistant, or a browser with JavaScript off reads a page's own HTML, so the pages people judge the business by say what they mean there.
+
+- **Our standard** carries every item in its HTML. The build asks the hub for the owner's current list (`/api/standard`, 4 seconds at most) and writes it into the page; if the hub can't be reached it writes the list this code ships with. The page's script then swaps in the current list for each visitor, so an edit in the dashboard shows at once for them and after the next deploy for everyone else.
+- **Approved companies** is live by design, so its HTML holds no list, no counts, and no empty headings. Without JavaScript it says so and points to the Contact page.
+- **Price marks** are written as `$`, `$$`, `$$$`. The dimmed signs beside them are drawn by the stylesheet.
+
 ### The public approved list
 
 `/approved` names the approved companies the owner has chosen to show, and `/approved?id=AV-1003` is one company's record page: the same lines a customer sees on its quote, plus its customer ratings. A company can link to its page from its own site, and anyone shown an approval can look the number up.

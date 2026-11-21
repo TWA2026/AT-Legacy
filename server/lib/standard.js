@@ -163,8 +163,34 @@ function addMonths(day, months) {
   return target.toISOString().slice(0, 10);
 }
 
+// The standard as the public sees it: the owner's wording, without the points or the numbers each tier needs.
+function shownStandard(standard) {
+  return {
+    must: standard.items.filter((item) => item.kind === "must").map((item) => item.label),
+    more: standard.items.filter((item) => item.kind === "points").map((item) => item.label),
+    months: standard.reviewMonths
+  };
+}
+
+const revisit = (months) => "We plan another visit to each company every " + (months === 12 ? "year" : months + " months") + " to keep it current.";
+
+// The Our standard page carries the list in its own HTML, so it reads without JavaScript, to a
+// search engine, and when the hub can't be reached. The page's script then swaps in the current
+// list from the dashboard.
+function fillStandardPage(html, shown) {
+  const escape = (text) => String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const items = (labels) => labels.map((label) => "<li>" + escape(label) + "</li>").join("\n        ");
+  return html
+    .replace("<!--standard:must-->", () => items(shown.must))
+    .replace("<!--standard:more-->", () => items(shown.more))
+    .replace("<!--standard:months-->", () => escape(revisit(shown.months)))
+    // With nothing past the basics, the second card stays in the page but hidden, so the script can bring it back.
+    .replace(/<!--standard:if-more-->([\s\S]*?)<!--\/standard:if-more-->\n?/g, (match, inner) =>
+      (shown.more.length ? inner : inner.replace('id="standard-more-card"', 'id="standard-more-card" hidden')));
+}
+
 module.exports = {
-  DEFAULT_STANDARD, MAX_ITEMS, MAX_LABEL, MAX_POINTS,
+  DEFAULT_STANDARD, MAX_ITEMS, MAX_LABEL, MAX_POINTS, shownStandard, fillStandardPage,
   checkStandard, loadStandard, saveStandard, standardFromForm, possiblePoints, tierFor, itemKey, metFromForm, scoreVisit,
   certificateNo, isDay, today, addMonths
 };

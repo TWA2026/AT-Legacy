@@ -4,6 +4,7 @@ const express = require("express");
 const { page } = require("./lib/html");
 const { stampPage } = require("./lib/stamp");
 const business = require("./lib/business");
+const { DEFAULT_STANDARD, shownStandard, fillStandardPage } = require("./lib/standard");
 const { createNotifier } = require("./lib/notify");
 
 const SITE_DIR = path.join(__dirname, "..", "site");
@@ -127,7 +128,10 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
     const details = business.load();;
     const stampedPages = new Map();
     const sitePage = (file) => {
-      if (!stampedPages.has(file)) stampedPages.set(file, stampPage(business.fill(fs.readFileSync(path.join(SITE_DIR, file), "utf8"), details), SITE_DIR));
+      if (!stampedPages.has(file)) {
+        const filled = business.fill(fs.readFileSync(path.join(SITE_DIR, file), "utf8"), details);
+        stampedPages.set(file, stampPage(fillStandardPage(filled, shownStandard(DEFAULT_STANDARD)), SITE_DIR));
+      }
       return stampedPages.get(file);
     };
     app.get(Object.keys(PAGES), (req, res) => {

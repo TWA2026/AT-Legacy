@@ -1,10 +1,13 @@
 // The approved companies page. With no ?id= it shows the list and the numbers.
 // With ?id=AV-1003 it shows that one company's record.
+// The record, the numbers, and the "not on the list" note are built here, so the page's own HTML
+// never holds an empty heading or a blank count.
 (function () {
   var listPart = document.getElementById("approved-list-part");
   if (!listPart || !window.fetch) return;
   var api = String(window.ATL_API || "").replace(/\/+$/, "");
   var status = document.getElementById("approved-status");
+  var detail = document.getElementById("approved-detail");
   var wanted = new URLSearchParams(window.location.search).get("id");
 
   function el(tag, text, className) {
@@ -14,14 +17,43 @@
     return node;
   }
 
-  function fill(target, lines) {
+  function link(text, href, className) {
+    var node = el("a", text, className);
+    node.href = href;
+    return node;
+  }
+
+  function part(title) {
+    var section = el("section", "", "read-part");
+    section.appendChild(el("h2", title));
+    detail.appendChild(section);
+    return section;
+  }
+
+  function listOf(lines) {
+    var list = el("ul");
     lines.forEach(function (line) {
-      target.appendChild(el("li", line));
+      list.appendChild(el("li", line));
     });
+    return list;
   }
 
   function stars(count) {
     return "★★★★★".slice(0, count) + "☆☆☆☆☆".slice(0, 5 - count);
+  }
+
+  function showNumbers(numbers) {
+    var section = part("Our numbers");
+    var table = el("dl", "", "numbers");
+    [["Approved today", numbers.approved], ["Working toward approval", numbers.working],
+      ["Applied and not approved", numbers.notApproved], ["Taken off the list", numbers.removed]].forEach(function (pair) {
+      var row = el("div");
+      row.appendChild(el("dt", pair[0]));
+      row.appendChild(el("dd", String(pair[1])));
+      table.appendChild(row);
+    });
+    section.appendChild(table);
+    section.appendChild(el("p", "Counted from our own records each time this page loads.", "form-note"));
   }
 
   function showList(data) {
@@ -29,9 +61,7 @@
     var companies = data.companies || [];
     companies.forEach(function (company) {
       var item = el("li");
-      var link = el("a", company.company);
-      link.href = "/approved?id=" + encodeURIComponent(company.no);
-      item.appendChild(link);
+      item.appendChild(link(company.company, "/approved?id=" + encodeURIComponent(company.no)));
       item.appendChild(el("span", company.service + ". " + company.tier + " tier."));
       item.appendChild(el("span", "Approved vendor " + company.no + ", since " + company.since));
       list.appendChild(item);
@@ -43,11 +73,7 @@
     }
     var numbers = data.numbers;
     if (!numbers) return;
-    document.getElementById("n-approved").textContent = numbers.approved;
-    document.getElementById("n-working").textContent = numbers.working;
-    document.getElementById("n-not").textContent = numbers.notApproved;
-    document.getElementById("n-removed").textContent = numbers.removed;
-    document.getElementById("approved-numbers").hidden = false;
+    showNumbers(numbers);
     var unnamed = numbers.approved - companies.length;
     if (unnamed > 0 && companies.length) {
       var note = document.getElementById("approved-unnamed");
@@ -63,22 +89,30 @@
     title.textContent = "Approved vendor ";
     title.appendChild(el("span", company.no, "keep-together"));
     document.getElementById("approved-lead").textContent = "What we have on file about this company. Every line is something we checked or saw ourselves.";
-    document.getElementById("record-name").textContent = company.company;
-    document.getElementById("record-line").textContent = company.service + ". " + company.tier + " tier.";
-    fill(document.getElementById("record-items"), company.items || []);
+
+    var section = part(company.company);
+    section.appendChild(el("p", company.service + ". " + company.tier + " tier."));
+    var record = el("div", "", "quote-record record-page");
+    record.appendChild(listOf(company.items || []));
     if (company.shown && company.shown.length) {
-      document.getElementById("record-shown-title").hidden = false;
-      fill(document.getElementById("record-shown"), company.shown);
+      record.appendChild(el("p", "Shown at our visit", "record-shown"));
+      record.appendChild(listOf(company.shown));
     }
-    document.getElementById("record-license").hidden = !company.stateLicense;
+    section.appendChild(record);
+    if (company.stateLicense) {
+      var license = el("p", "You can look up a Florida contractor’s license yourself at ", "form-note");
+      var state = link("myfloridalicense.com", "https://www.myfloridalicense.com");
+      state.rel = "noopener";
+      license.appendChild(state);
+      license.appendChild(document.createTextNode("."));
+      section.appendChild(license);
+    }
     if (company.ratings) {
-      var rated = document.getElementById("record-ratings");
-      rated.textContent = "Rated " + Number(company.ratings.average).toFixed(1) + " out of 5 by " + company.ratings.count +
-        " customers who hired this company through us. Every rating counts, not only the good ones.";
-      rated.hidden = false;
+      section.appendChild(el("p", "Rated " + Number(company.ratings.average).toFixed(1) + " out of 5 by " + company.ratings.count +
+        " customers who hired this company through us. Every rating counts, not only the good ones."));
     }
     if (company.reviews && company.reviews.length) {
-      var reviews = document.getElementById("record-reviews");
+      var reviews = el("ul", "", "review-list");
       company.reviews.forEach(function (review) {
         var item = el("li");
         var mark = el("p", stars(review.stars), "review-stars");
@@ -89,10 +123,21 @@
         item.appendChild(el("p", review.name + ", " + review.when, "review-who"));
         reviews.appendChild(item);
       });
-      reviews.hidden = false;
+      section.appendChild(reviews);
     }
-    document.getElementById("record-request").href = "/quote?service=" + encodeURIComponent(company.service) + "&tier=" + encodeURIComponent(company.tier);
-    document.getElementById("approved-record").hidden = false;
+    var actions = el("p", "", "done-actions");
+    actions.appendChild(link("Start a request", "/quote?service=" + encodeURIComponent(company.service) + "&tier=" + encodeURIComponent(company.tier), "secondary"));
+    actions.appendChild(link("See the whole list", "/approved", "secondary"));
+    section.appendChild(actions);
+  }
+
+  function showMissing() {
+    var section = part("Not on the list");
+    section.appendChild(el("p", "No company with that number is on our public list today. A company comes off when it stops meeting our standard, and some approved companies aren’t named here."));
+    var actions = el("p", "", "done-actions");
+    actions.appendChild(link("See the whole list", "/approved", "secondary"));
+    actions.appendChild(link("Ask us about a company", "/contact", "secondary"));
+    section.appendChild(actions);
   }
 
   function failed() {
@@ -100,11 +145,12 @@
     listPart.hidden = false;
   }
 
+  status.textContent = "Loading the list.";
   if (wanted) {
     listPart.hidden = true;
     fetch(api + "/api/approved/" + encodeURIComponent(wanted)).then(function (response) {
       if (response.status === 404) {
-        document.getElementById("approved-missing").hidden = false;
+        showMissing();
         return null;
       }
       if (!response.ok) throw new Error("unavailable");

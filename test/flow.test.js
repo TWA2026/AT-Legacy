@@ -1528,7 +1528,7 @@ test("business details: one file fills every page, and an empty detail takes its
     const response = await site.get("/" + name);
     assert.equal(response.status, 200, name);
     const html = await response.text();
-    assert.ok(!/\{\{|<!--\/?if:/.test(html), name + " has nothing left unfilled");
+    assert.ok(!/\{\{|<!--\/?if:|<!--\/?standard:/.test(html), name + " has nothing left unfilled");
     assert.ok(!html.includes("hello@atlegacyservices.com") && !html.includes("tel:"), name + " shows no contact detail that isn't set");
     assert.ok(html.includes('href="/privacy"') && html.includes('href="/terms"') && html.includes('href="/contact"'), name + " links the policy pages");
     assert.ok(html.includes('rel="canonical" href="https://atlegacyservices.com/' + name + '"'), name + " names its own address");
@@ -1563,7 +1563,10 @@ test("business details: one file fills every page, and an empty detail takes its
     assert.doesNotMatch(read("about.html"), /run by AT Legacy Group LLC, a Florida company/);
     assert.match(read("contact.html"), /Reach us directly[\s\S]*813-555-0142<\/a>, Monday to Saturday, 8 to 6[\s\S]*mailto:hello@atlegacyservices\.com/);
     assert.match(read("contact.html"), /We answer within one business day\./);
-    for (const name of fs.readdirSync(path.join(root, "dist")).filter((file) => file.endsWith(".html"))) assert.ok(!/\{\{|<!--\/?if:/.test(read(name)), name);
+    for (const name of fs.readdirSync(path.join(root, "dist")).filter((file) => file.endsWith(".html"))) assert.ok(!/\{\{|<!--\/?if:|<!--\/?standard:/.test(read(name)), name);
+    // With the hub out of reach, the build writes the standard this code ships with into the page.
+    assert.match(built.stdout, /the standard from the list in the code/);
+    assert.match(read("standard.html"), /<li>The job site is safe and kept clean<\/li>/);
     assert.match(read("contact.html"), /src="contact\.js\?v=[a-f0-9]{10}"/);
   } finally {
     fs.writeFileSync(path.join(root, "business.json"), real);
@@ -1840,7 +1843,7 @@ test("services: the owner switches each one on or off, and the site follows", as
     })).status, 201);
 
     // The public pages carry what the switch needs: a place for the note, and the script that reads the answer.
-    assert.match(await (await site.get("/quote")).text(), /<p class="form-note" id="service-note" role="status" hidden>We aren&rsquo;t taking requests for that service right now\./);
+    assert.match(await (await site.get("/quote")).text(), /<p class="form-note form-flag" id="service-note" role="status" hidden>We aren&rsquo;t taking requests for that service right now\./);
     assert.match(await (await site.get("/quote.js")).text(), /\/api\/services/);
     assert.match(await (await site.get("/home.js")).text(), /\/api\/services/);
 
@@ -1975,6 +1978,71 @@ test("the public approved list: a company is named only when the owner turns it 
     assert.equal((await site.get("/api/approved/" + certificateNo(crew.id))).status, 404);
   }
   for (const bad of ["AV-999999", "nonsense", "AV-1000", "%27%20or%201=1"]) assert.equal((await site.get("/api/approved/" + bad)).status, 404, bad);
+});
+
+test("pages that read without JavaScript: the standard is in its page, and nothing is left half filled", async () => {
+  const site = await start();
+  const { DEFAULT_STANDARD, loadStandard, saveStandard, shownStandard, fillStandardPage } = require("../server/lib/standard");
+  const text = (html) => html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/&rsquo;/g, "’").replace(/\s+/g, " ");
+
+  // Our standard: every item is in the HTML itself, the basics apart from what earns a higher tier.
+  const standard = await (await site.get("/standard")).text();
+  const shown = shownStandard(DEFAULT_STANDARD);
+  assert.deepEqual([shown.must.length, shown.more.length, shown.months], [5, 8, 12]);
+  const card = (id) => standard.slice(standard.indexOf('id="' + id + '"'), standard.indexOf("</ul>", standard.indexOf('id="' + id + '"')));
+  assert.deepEqual([...card("standard-must").matchAll(/<li>([^<]+)<\/li>/g)].map((m) => m[1]), shown.must);
+  assert.deepEqual([...card("standard-more").matchAll(/<li>([^<]+)<\/li>/g)].map((m) => m[1]), shown.more);
+  assert.match(standard, /<span id="standard-months">We plan another visit to each company every year to keep it current\.<\/span>/);
+  assert.ok(!/Loading|needs JavaScript|standard-status/.test(standard), "no loading line and no JavaScript notice");
+  assert.ok(!/points|premium needs|mid needs/i.test(text(standard)), "points and tier numbers stay private");
+  // The helper: wording is escaped, and with nothing past the basics the second sheet is kept but hidden.
+  const bare = fillStandardPage(fs.readFileSync(path.join(__dirname, "..", "site", "standard.html"), "utf8"), { must: ["Clean <site> & safe"], more: [], months: 6 });
+  assert.ok(bare.includes("<li>Clean &lt;site&gt; &amp; safe</li>") && bare.includes('id="standard-more-card" hidden') && bare.includes("every 6 months"));
+  assert.ok(!/<!--\/?standard:/.test(bare));
+
+  // Approved companies: no blank counts, no empty headings, no line that says it is loading.
+  const approved = await (await site.get("/approved")).text();
+  assert.ok(!/<h2[^>]*>\s*<\/h2>|<dd[^>]*>\s*<\/dd>|Loading/.test(approved));
+  assert.ok(!/Approved today|Working toward approval|Not on the list/.test(approved), "the numbers and the not-listed note are added only when there is something to say");
+  assert.match(approved, /<noscript><p class="form-note">This list is kept live from our records[^<]*<a href="\/contact">send us its name or approval number<\/a>/);
+  assert.match(approved, /if you can&rsquo;t find one, <a href="\/contact">ask us<\/a>/);
+  assert.equal((approved.match(/<h2/g) || []).length, 2);
+
+  // Price marks: the page's own text says $, $$, $$$ for the three tiers, in that order.
+  for (const name of ["", "partners", "quote"]) {
+    const html = await (await site.get("/" + name)).text();
+    const marks = [...html.matchAll(/<span class="marks"[^>]*>([\s\S]*?)<\/span>/g)].map((m) => m[1].replace(/<[^>]+>/g, ""));
+    assert.ok(marks.length >= 3 && marks.length % 3 === 0, name);
+    for (let i = 0; i < marks.length; i += 3) assert.deepEqual(marks.slice(i, i + 3), ["$", "$$", "$$$"], name);
+    assert.ok(!/<\/b>\$+<\/span>/.test(html), name + " has no dimmed dollar signs written as text");
+  }
+  // The request form's notes about a service are marked to stand out.
+  const quote = await (await site.get("/quote")).text();
+  assert.match(quote, /<p class="form-note form-flag" id="service-note" role="status" hidden>/);
+  assert.match(quote, /<p class="form-note form-flag" id="coverage-note" role="status" hidden>/);
+
+  // The static build asks the hub for the owner's current standard and writes that into the page.
+  const root = path.join(__dirname, "..");
+  const build = (hub) => new Promise((resolve) => {
+    require("node:child_process").execFile(process.execPath, ["scripts/build-site.js"], { cwd: root, env: { ...process.env, HUB_URL: hub } }, (error, stdout, stderr) => resolve({ error, stdout, stderr }));
+  });
+  const before = await loadStandard(pool);
+  try {
+    // (With no items past the basics, the tiers can't ask for points, so both need 0.)
+    await saveStandard(pool, { mid: 0, premium: 0, reviewMonths: 6, items: [{ label: "Crew wears eye protection <always>", kind: "must", points: 0 }, ...before.items.filter((item) => item.kind === "must").slice(1)] });
+    assert.equal((await (await site.get("/api/standard")).json()).must[0], "Crew wears eye protection <always>");
+    const built = await build(site.base);
+    assert.equal(built.error, null, built.stderr);
+    assert.match(built.stdout, /the standard from the hub/);
+    const page = fs.readFileSync(path.join(root, "dist", "standard.html"), "utf8");
+    assert.ok(page.includes("<li>Crew wears eye protection &lt;always&gt;</li>") && !page.includes("The job site is safe and kept clean"));
+    assert.ok(page.includes('id="standard-more-card" hidden') && page.includes("every 6 months"));
+    assert.match(page, /src="standard\.js\?v=[a-f0-9]{10}"/);
+  } finally {
+    await pool.query("delete from settings where key = 'standard'");
+    fs.rmSync(path.join(root, "dist"), { recursive: true, force: true });
+  }
+  assert.deepEqual(shownStandard(await loadStandard(pool)), shown, "the standard is back as it was for the tests that follow");
 });
 
 test("repairs go to our own crew with no fee", async () => {

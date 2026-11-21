@@ -39,21 +39,31 @@
       </ul>
     </section>
 
-    <section class="read-part">
+    <section class="read-part standard-part">
       <h2>What we look for at the visit</h2>
       <p>We go to one of the company&rsquo;s job sites, or its shop, and score what we see.</p>
-      <h3>Every approved company meets all of these</h3>
-      <ul class="read-checks" id="standard-must"></ul>
-      <h3 id="standard-more-title" hidden>What earns a higher tier</h3>
-      <p id="standard-more-note" hidden>Past the basics, these are what we give credit for. A company that shows more of them is placed in a higher tier.</p>
-      <ul class="read-checks" id="standard-more"></ul>
-      <p class="form-note" id="standard-status" role="status">Loading the list.</p>
-      <noscript><p class="form-note">The list needs JavaScript to load. Ask us for a copy and we&rsquo;ll send it.</p></noscript>
+      <div class="standard-lists">
+        <div class="standard-card">
+          <h3>Every approved company meets all of these</h3>
+          <ul class="read-checks" id="standard-must">
+        <!--standard:must-->
+          </ul>
+        </div>
+<!--standard:if-more-->
+        <div class="standard-card" id="standard-more-card">
+          <h3>What earns a higher tier</h3>
+          <p>Past the basics, these are what we give credit for. A company that shows more of them is placed in a higher tier.</p>
+          <ul class="read-checks" id="standard-more">
+        <!--standard:more-->
+          </ul>
+        </div>
+<!--/standard:if-more-->
+      </div>
     </section>
 
     <section class="read-part">
       <h2>How a company comes off the list</h2>
-      <p>An approval runs out. <span id="standard-months">We visit each company again to keep it current.</span> We take a company off the list when any of these happens:</p>
+      <p>An approval runs out. <span id="standard-months"><!--standard:months--></span> We take a company off the list when any of these happens:</p>
       <ul class="read-points">
         <li>We find that a license or insurance policy it needs has run out.</li>
         <li>It misses one of the basics at a later visit and doesn&rsquo;t fix it.</li>

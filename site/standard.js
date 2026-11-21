@@ -1,12 +1,13 @@
-// The standard page: shows the list the owner keeps in the dashboard, so the page never drifts from it.
+// The standard page. The list is already written into the page. This swaps in the list the owner
+// keeps in the dashboard, in case it has changed since the page was built. If the hub can't be
+// reached, the page stays as it is.
 (function () {
   var must = document.getElementById("standard-must");
-  if (!must) return;
+  if (!must || !window.fetch) return;
   var api = String(window.ATL_API || "").replace(/\/+$/, "");
-  var more = document.getElementById("standard-more");
-  var status = document.getElementById("standard-status");
 
   function list(target, labels) {
+    while (target.firstChild) target.removeChild(target.firstChild);
     labels.forEach(function (label) {
       var item = document.createElement("li");
       item.textContent = label;
@@ -15,21 +16,19 @@
   }
 
   fetch(api + "/api/standard").then(function (response) {
-    if (!response.ok) throw new Error("unavailable");
-    return response.json();
+    return response.ok ? response.json() : null;
   }).then(function (standard) {
-    list(must, standard.must || []);
-    if (standard.more && standard.more.length) {
+    if (!standard || !Array.isArray(standard.must) || !standard.must.length) return;
+    list(must, standard.must);
+    var more = document.getElementById("standard-more");
+    var card = document.getElementById("standard-more-card");
+    if (more && Array.isArray(standard.more)) {
       list(more, standard.more);
-      document.getElementById("standard-more-title").hidden = false;
-      document.getElementById("standard-more-note").hidden = false;
+      card.hidden = !standard.more.length;
     }
     if (standard.months) {
       document.getElementById("standard-months").textContent = "We plan another visit to each company every " +
         (standard.months === 12 ? "year" : standard.months + " months") + " to keep it current.";
     }
-    status.hidden = true;
-  }).catch(function () {
-    status.textContent = "We couldn’t load the list just now. Try again in a minute, or ask us for a copy.";
-  });
+  }).catch(function () {});
 })();

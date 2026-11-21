@@ -64,7 +64,7 @@
                 <option>Something else</option>
               </optgroup>
             </select>
-            <p class="form-note" id="service-note" role="status" hidden>We aren&rsquo;t taking requests for that service right now. Choose another one, or <a class="plain-link" href="/contact">send us a message</a>.</p>
+            <p class="form-note form-flag" id="service-note" role="status" hidden>We aren&rsquo;t taking requests for that service right now. Choose another one, or <a class="plain-link" href="/contact">send us a message</a>.</p>
             <div class="service-infos" id="service-infos" aria-live="polite" hidden>
               <div class="service-info" data-service="Pool" hidden>
                 <svg class="pic" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><rect class="wet" x="8" y="15" width="32" height="20" rx="8"/><path d="M15 23.5q2.5-2.6 5 0t5 0t5 0M18 29.5q2.5-2.6 5 0t5 0"/><path class="au" d="M31.5 11.5v7M35.5 11.5v7"/></svg>
@@ -287,20 +287,20 @@
 
       <fieldset class="form-part tier-part" id="tier-part">
         <legend>Which quotes do you want?</legend>
-        <p class="form-note" id="coverage-note" role="status" hidden></p>
+        <p class="form-note form-flag" id="coverage-note" role="status" hidden></p>
         <p class="form-note" id="tier-help">Choose one, two, or all three. Every company is verified.</p>
         <div class="tier-picks">
           <label class="tier-pick">
             <input type="checkbox" name="tier" value="Affordable" checked>
             <span class="tier-pick-body">
-              <span class="tier-name">Affordable <span class="marks" aria-hidden="true"><b>$</b>$$</span></span>
+              <span class="tier-name">Affordable <span class="marks" aria-hidden="true"><b>$</b><i data-rest="$$"></i></span></span>
               <span>The lowest price from a verified company.</span>
             </span>
           </label>
           <label class="tier-pick">
             <input type="checkbox" name="tier" value="Mid-range" checked>
             <span class="tier-pick-body">
-              <span class="tier-name">Mid-range <span class="marks" aria-hidden="true"><b>$$</b>$</span></span>
+              <span class="tier-name">Mid-range <span class="marks" aria-hidden="true"><b>$$</b><i data-rest="$"></i></span></span>
               <span>An established company with a written warranty.</span>
             </span>
           </label>
