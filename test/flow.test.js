@@ -1523,7 +1523,7 @@ test("business details: one file fills every page, and an empty detail takes its
 
   // The repository's own file starts empty, so the live pages show no phone number, no email, and nothing half filled.
   const site = await start();
-  const names = ["", "quote", "partners", "about", "standard", "contact", "privacy", "terms"];
+  const names = ["", "quote", "partners", "about", "standard", "approved", "contact", "privacy", "terms"];
   for (const name of names) {
     const response = await site.get("/" + name);
     assert.equal(response.status, 200, name);
@@ -1862,6 +1862,119 @@ test("services: the owner switches each one on or off, and the site follows", as
     // Later tests expect every service to be on.
     await pool.query("delete from settings where key = 'services_off'");
   }
+});
+
+test("the public approved list: a company is named only when the owner turns it on, with a record anyone can check", async () => {
+  const site = await start({ SITE_ORIGINS: "https://www.example.test" });
+  const admin = await login(site);
+  const cookie = { cookie: admin.cookie };
+  const { certificateNo } = require("../server/lib/standard");
+  const record = require("../server/lib/record");
+  assert.deepEqual(["AV-1003", "av-1003", " AV-1003 ", "AV-1000", "AV-99", "1003", "AV-1003x", ""].map(record.idFromCertificate), [3, 3, 3, null, null, null, null, null]);
+
+  // The pages are there, with the words the site now stands on.
+  const page = await (await site.get("/approved")).text();
+  assert.match(page, /<h1 id="approved-title">Approved companies<\/h1>/);
+  assert.match(page, /src="approved\.js\?v=[a-f0-9]{10}"/);
+  assert.equal((await site.get("/approved.html")).status, 200);
+  assert.match(await (await site.get("/about")).text(), /<h2>Our mission<\/h2>\s*<p class="read-lead">AT Legacy Services helps good small companies earn the trust a big company gets on name alone\./);
+  assert.match(await (await site.get("/partners")).text(), /<p class="partner-mission">You do big-company work\. We give you the proof:/);
+  const standard = await (await site.get("/standard")).text();
+  assert.match(standard, /<h2>How a company comes off the list<\/h2>/);
+  assert.match(standard, /A customer brings us a complaint about its work and the company doesn&rsquo;t put it right\./);
+  assert.ok(fs.readFileSync(path.join(__dirname, "..", "site", "sitemap.xml"), "utf8").includes("<loc>https://atlegacyservices.com/approved</loc>"));
+  for (const name of ["approved", "about", "partners", "standard"]) assert.ok(!/certified|guarantee[ds]?\b(?! of)/i.test(await (await site.get("/" + name)).text()), name + " doesn't call an approval certified or guaranteed");
+
+  // Three companies in a trade no other test uses, so the names here are only these.
+  const lit = await addVerifiedPartner(site, admin, "Bright <Yard> Lighting", "Premium", "Outdoor lighting");
+  const dim = await addVerifiedPartner(site, admin, "Dim Yard Lighting", "Affordable", "Outdoor lighting");
+  await pool.query("update partners set license_no = 'EC13001234' where id = $1", [lit.id]);
+  const names = async () => (await (await site.get("/api/approved")).json()).companies.map((c) => c.company);
+  assert.ok(!(await names()).includes("Bright <Yard> Lighting"), "approved, but not named until the owner turns it on");
+  const no = certificateNo(lit.id);
+  assert.equal((await site.get("/api/approved/" + no)).status, 404);
+
+  // The owner's switch, on the company's page.
+  let own = await (await site.get("/admin/partners/" + lit.id, cookie)).text();
+  assert.match(own, /<h2>Public record page<\/h2>\s*<p class="form-note"><strong>Off\.<\/strong> Only a customer with a quote from Bright &lt;Yard&gt; Lighting sees its record\./);
+  assert.equal((await site.form("/admin/partners/" + lit.id + "/listed", { listed: "1" }, cookie)).status, 403, "needs the form token");
+  const on = await site.form("/admin/partners/" + lit.id + "/listed", { csrf: admin.csrf, listed: "1" }, cookie);
+  assert.deepEqual([on.status, on.headers.get("location")], [303, "/admin/partners/" + lit.id + "#public"]);
+  own = await (await site.get("/admin/partners/" + lit.id, cookie)).text();
+  assert.match(own, /<strong>On\.<\/strong> Bright &lt;Yard&gt; Lighting is named on your website&rsquo;s approved list/);
+  assert.ok(own.includes('data-copy-text="https://example.test/approved?id=' + no + '"') && own.includes(">Take it off the website</button>"));
+  assert.match(await (await site.get("/admin/links", cookie)).text(), /Approved companies<\/p>[\s\S]*?example\.test<wbr>\/approved/);
+
+  // The list names it, and counts every company whether named or not.
+  const list = await (await site.get("/api/approved", { origin: "https://www.example.test" })).json();
+  const entry = list.companies.find((c) => c.no === no);
+  assert.deepEqual([entry.company, entry.service, entry.tier], ["Bright <Yard> Lighting", "Outdoor lighting", "Premium"]);
+  assert.match(entry.since, /^[A-Z][a-z]{2} \d{1,2}, \d{4}$/);
+  assert.ok(!list.companies.some((c) => c.company === "Dim Yard Lighting"));
+  assert.deepEqual(Object.keys(list.numbers).sort(), ["approved", "notApproved", "removed", "working"]);
+  const before = list.numbers;
+  assert.ok(before.approved >= 2);
+  assert.ok(!JSON.stringify(list).includes("813-555") && !JSON.stringify(list).includes("pat@example.test"), "no contact details");
+  assert.equal((await fetch(site.base + "/api/approved", { headers: { origin: "https://www.example.test" } })).headers.get("access-control-allow-origin"), "https://www.example.test");
+
+  // Its record: what the owner checked and saw, and nothing the company claimed.
+  let rec = await (await site.get("/api/approved/" + no.toLowerCase())).json();
+  assert.deepEqual([rec.no, rec.company, rec.service, rec.tier, rec.stateLicense, rec.ratings, rec.reviews], [no, "Bright <Yard> Lighting", "Outdoor lighting", "Premium", true, null, []]);
+  assert.equal(rec.items[0], "Approved vendor " + no + ", since " + entry.since);
+  assert.ok(rec.items.includes("License checked: DBPR electrical license for wired systems, number EC13001234") && rec.items.includes("Proof of liability insurance on file"));
+  assert.ok(rec.shown.includes("In business 3 years or more"));
+  assert.deepEqual(Object.keys(rec).sort(), ["company", "items", "no", "ratings", "reviews", "service", "shown", "since", "stateLicense", "tier"]);
+
+  // Ratings: every one counts toward the average, which shows from the third on. Words show only when published.
+  const rate = async (stars, comment, share, publish) => {
+    const { row } = await createRequest(site, { service: "Outdoor lighting", tiers: ["Premium"], name: "Robin Customer" });
+    await site.form("/admin/requests/" + row.id + "/invite", { csrf: admin.csrf, partner: String(lit.id), tier: "Premium" }, cookie);
+    const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
+    await site.form("/q/" + quote.token, { action: "submit", amount: "4000", timeline: "1 week", includes: "Path lights." });
+    await site.form("/r/" + row.token + "/choose", { quote: String(quote.id) });
+    await site.form("/r/" + row.token + "/rating", { stars: String(stars), again: "yes", comment, ...(share ? { may_publish: "on" } : {}) });
+    if (publish) await pool.query("update ratings set published = true where request_id = $1", [row.id]);
+  };
+  await rate(5, "Neat work.", true, true);
+  await rate(2, "Late twice.", false, false);
+  rec = await (await site.get("/api/approved/" + no)).json();
+  assert.equal(rec.ratings, null, "two ratings: no average yet");
+  assert.deepEqual(rec.reviews.map((r) => [r.stars, r.comment, r.name]), [[5, "Neat work.", "Robin"]]);
+  await rate(4, "Private words <b>", true, false);
+  rec = await (await site.get("/api/approved/" + no)).json();
+  assert.deepEqual(rec.ratings, { count: 3, average: 3.7 }, "the 2-star rating counts, though its words aren't shown");
+  assert.equal(rec.reviews.length, 1);
+  assert.ok(!JSON.stringify(rec).includes("Late twice") && !JSON.stringify(rec).includes("Private words") && !JSON.stringify(rec).includes("Customer"));
+  const asked = await (await site.get("/r/" + (await pool.query("select token from requests order by id desc limit 1")).rows[0].token)).text();
+  assert.ok(!asked.includes("rating-form"), "already rated");
+
+  // Paused: off the list that day, counted as taken off, and its number answers "not on the list".
+  const form = { csrf: admin.csrf, company: "Bright <Yard> Lighting", contact_name: "Pat Partner", phone: "813-555-0199", email: "pat@example.test", trade: "Outdoor lighting", tier: "Premium",
+    check_registration: "on", check_license: "on", check_insurance: "on", check_references: "on", license_no: "EC13001234" };
+  assert.equal((await site.form("/admin/partners/" + lit.id, { ...form, status: "paused" }, cookie)).status, 303);
+  const gone = await site.get("/api/approved/" + no);
+  assert.equal(gone.status, 404);
+  assert.match((await gone.json()).error, /No company with that number is on our public list today\./);
+  const after = (await (await site.get("/api/approved")).json());
+  assert.ok(!after.companies.some((c) => c.no === no));
+  assert.deepEqual([after.numbers.approved, after.numbers.removed], [before.approved - 1, before.removed + 1]);
+  assert.doesNotMatch(await (await site.get("/admin/partners/" + lit.id, cookie)).text(), /Public record page/, "nothing to switch while it is paused");
+  // An applicant who is paused was never approved, so it counts as not approved.
+  await site.form("/admin/partners", { csrf: admin.csrf, company: "Never Lighting", contact_name: "A", trade: "Outdoor lighting", tier: "Affordable", status: "applied" }, cookie);
+  const never = (await pool.query("select id from partners where company = 'Never Lighting'")).rows[0].id;
+  const working = (await (await site.get("/api/approved")).json()).numbers;
+  assert.equal(working.working, after.numbers.working + 1);
+  await site.form("/admin/partners/" + never, { csrf: admin.csrf, company: "Never Lighting", contact_name: "A", trade: "Outdoor lighting", tier: "Affordable", status: "paused" }, cookie);
+  const final = (await (await site.get("/api/approved")).json()).numbers;
+  assert.deepEqual([final.working, final.notApproved], [after.numbers.working, after.numbers.notApproved + 1]);
+  // The owner's own crew is never on the list, and never counted.
+  const crew = (await pool.query("select id from partners where trade = 'Home repairs and upkeep' limit 1")).rows[0];
+  if (crew) {
+    await site.form("/admin/partners/" + crew.id + "/listed", { csrf: admin.csrf, listed: "1" }, cookie);
+    assert.equal((await pool.query("select listed from partners where id = $1", [crew.id])).rows[0].listed, false);
+    assert.equal((await site.get("/api/approved/" + certificateNo(crew.id))).status, 404);
+  }
+  for (const bad of ["AV-999999", "nonsense", "AV-1000", "%27%20or%201=1"]) assert.equal((await site.get("/api/approved/" + bad)).status, 404, bad);
 });
 
 test("repairs go to our own crew with no fee", async () => {

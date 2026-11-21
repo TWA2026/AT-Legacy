@@ -912,6 +912,24 @@ ${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
 
   // One company's page: its details and paperwork, then its site visits.
   // `error` belongs to the details form. `visitError` belongs to the scorecard, further down the page.
+  // An approved company's place on the website's approved list. Off until the owner turns it on,
+  // because it puts the company's name and record in front of anyone.
+  function publicSection(req, p) {
+    if (p.trade === OWN_CREW_SERVICE || p.status !== "verified" || !p.approved_on) return "";
+    const link = siteUrl(req) + "/approved?id=" + certificateNo(p.id);
+    return `
+    <section class="app-section owner-after" id="public">
+      <h2>Public record page</h2>
+      ${p.listed ? `<p class="form-note"><strong>On.</strong> ${esc(p.company)} is named on your website&rsquo;s approved list, with a page that shows its record.</p>
+      ${linkRow({ id: "link-record", readable: true, label: "Its record page", link, note: "The company can link to this from its own website, estimates, or truck.", textTo: p.phone, emailTo: p.email, who: String(p.contact_name).trim().split(/\s+/)[0], subject: "Your approved vendor page", message: "Your AT Legacy Services approved vendor page:", open: "Open it" })}`
+        : `<p class="form-note"><strong>Off.</strong> Only a customer with a quote from ${esc(p.company)} sees its record. Turn this on once the company agrees to be named on your website.</p>`}
+      <form method="post" action="/admin/partners/${p.id}/listed">
+        ${csrfField}
+        <button class="secondary" type="submit" name="listed" value="${p.listed ? "0" : "1"}">${p.listed ? "Take it off the website" : "Show it on the website"}</button>
+      </form>
+    </section>`;
+  }
+
   async function partnerPage(req, p, { error = "", form = null, shown = null, visitError = "" } = {}) {
     const ownCrew = p.trade === OWN_CREW_SERVICE;
     const standard = ownCrew ? null : await loadStandard(pool);
@@ -924,6 +942,7 @@ ${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
       ...PARTNER_PAGE, title: p.company, heading: p.company,
       intro: "Added " + formatDate(p.created_at) + ". " + STATUS_LABELS[p.status] + ".",
       body: alert + partnerForm(form ? { ...p, ...form } : p, "/admin/partners/" + p.id, error)
+        + publicSection(req, p)
         + (rated.jobs ? `
     <section class="app-section owner-after">
       <h2>Customer ratings</h2>
@@ -963,6 +982,16 @@ ${group("Your own crew", partners.filter((p) => p.trade === OWN_CREW_SERVICE))}
       const p = (await pool.query("select * from partners where id = $1", [Number(req.params.id) || 0])).rows[0];
       if (!p) return next();
       res.send(await partnerPage(req, p));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/partners/:id/listed", async (req, res, next) => {
+    try {
+      const id = Number(req.params.id) || 0;
+      await pool.query("update partners set listed = $1 where id = $2 and trade <> $3", [req.body.listed === "1", id, OWN_CREW_SERVICE]);
+      res.redirect(303, "/admin/partners/" + id + "#public");
     } catch (error) {
       next(error);
     }
@@ -1607,6 +1636,7 @@ ${rows}
       <h2>For customers</h2>
       ${linkRow({ id: "link-quote", readable: true, label: "Request form", link: site + "/quote", note: "Send or post this one. A customer describes the job once and picks the tiers they want. Their request then shows up under Requests.", message: "Get up to three quotes from verified local companies with one request:", open: "Open the request form" })}
       ${linkRow({ id: "link-home", readable: true, label: "Home page", link: site + "/", note: "Explains how it works, the three tiers, and the services.", message: "AT Legacy Services: one request, three quotes from verified local companies.", open: "Open the home page" })}
+      ${linkRow({ id: "link-approved", readable: true, label: "Approved companies", link: site + "/approved", note: "The companies you have put on the public list, each with a record page of its own, and your numbers. A company appears once you turn its public page on, from its page under Partners.", message: "The companies AT Legacy Services has checked and visited:", open: "Open the approved list" })}
     </section>
     <section class="app-section">
       <h2>For companies</h2>

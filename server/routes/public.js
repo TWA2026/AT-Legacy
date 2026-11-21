@@ -7,6 +7,9 @@ const { newToken, sign, safeEqual, rateLimiter } = require("../lib/security");
 const { BODY_LIMIT, FileError, saveFile } = require("../lib/files");
 const { loadStandard } = require("../lib/standard");
 const { loadOff } = require("../lib/services");
+const { certificateNo } = require("../lib/standard");
+const { formatDay } = require("../lib/html");
+const record = require("../lib/record");
 
 const PROPERTIES = ["My home", "My rental property", "Other"];
 const TIMINGS = ["As soon as possible", "Within a month", "In 1 to 3 months", "I’m flexible"];
@@ -205,6 +208,63 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
         company: row.company,
         when: new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "America/New_York" }).format(row.created_at)
       })));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The approved list as the website shows it. A company is named only when it is approved today
+  // and the owner has switched its public page on. The numbers count every company, named or not,
+  // and appear once there is at least one approval to count.
+  const RATINGS_TO_SHOW_AN_AVERAGE = 3;
+  const firstName = (name) => String(name).trim().split(/\s+/)[0];
+  const monthOf = (date) => new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "America/New_York" }).format(date);
+
+  router.get("/approved", async (req, res, next) => {
+    try {
+      const counts = (await pool.query(
+        `select count(*) filter (where status = 'verified')::int as approved,
+                count(*) filter (where status = 'applied')::int as working,
+                count(*) filter (where status = 'paused' and approved_on = '')::int as "notApproved",
+                count(*) filter (where status = 'paused' and approved_on <> '')::int as removed
+           from partners where trade <> $1`, [OWN_CREW_SERVICE]
+      )).rows[0];
+      const companies = (await pool.query(
+        "select id, company, trade, tier, approved_on from partners where status = 'verified' and listed and approved_on <> '' and trade <> $1 order by company", [OWN_CREW_SERVICE]
+      )).rows;
+      res.set("Cache-Control", "public, max-age=60").json({
+        numbers: counts.approved ? counts : null,
+        companies: companies.map((p) => ({ no: certificateNo(p.id), company: p.company, service: p.trade, tier: p.tier, since: formatDay(p.approved_on) }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // One company's record, by its approved vendor number. Anything else gets the same plain "not on the list".
+  router.get("/approved/:no", async (req, res, next) => {
+    try {
+      const id = record.idFromCertificate(req.params.no);
+      const p = id ? (await pool.query(
+        "select * from partners where id = $1 and status = 'verified' and listed and approved_on <> '' and trade <> $2", [id, OWN_CREW_SERVICE]
+      )).rows[0] : null;
+      res.set("Cache-Control", "public, max-age=60");
+      if (!p) return res.status(404).json({ error: "No company with that number is on our public list today." });
+      // Every rating counts toward the average, not only the ones a customer agreed to show.
+      // It appears from the third rating on, so one customer's stars are never singled out.
+      const rated = (await pool.query(
+        "select count(*)::int as count, round(avg(g.stars), 1)::float as average from ratings g join quotes q on q.id = g.quote_id where q.partner_id = $1", [p.id]
+      )).rows[0];
+      const reviews = (await pool.query(
+        `select g.stars, g.comment, g.created_at, r.name from ratings g join requests r on r.id = g.request_id join quotes q on q.id = g.quote_id
+          where q.partner_id = $1 and g.published and g.may_publish order by g.created_at desc limit 6`, [p.id]
+      )).rows;
+      res.json({
+        no: certificateNo(p.id), company: p.company, service: p.trade, tier: p.tier, since: formatDay(p.approved_on),
+        items: record.recordItems(p), shown: record.shownAtVisit(p), stateLicense: record.stateLicense(p),
+        ratings: rated.count >= RATINGS_TO_SHOW_AN_AVERAGE ? { count: rated.count, average: rated.average } : null,
+        reviews: reviews.map((row) => ({ stars: row.stars, comment: row.comment, name: firstName(row.name), when: monthOf(row.created_at) }))
+      });
     } catch (error) {
       next(error);
     }

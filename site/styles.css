@@ -3751,3 +3751,117 @@ html {
     transition: none;
   }
 }
+
+/* The mission statement, on About and on the For companies page. */
+.read-lead,
+.partner-mission {
+  max-width: 34em;
+  margin: 0;
+  color: var(--navy);
+  font-size: clamp(1.2rem, 4.4vw, 1.45rem);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.partner-mission {
+  margin-bottom: 26px;
+  padding-left: 18px;
+  border-left: 6px solid var(--gold);
+}
+
+.keep-together {
+  white-space: nowrap;
+}
+
+/* The approved companies page: the list, one company's record, and the numbers. */
+.approved-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approved-list:empty {
+  display: none;
+}
+
+.approved-list li {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-left: 6px solid var(--gold);
+  border-radius: 8px;
+  background: var(--white);
+}
+
+.approved-list a {
+  justify-self: start;
+  font-size: 1.2rem;
+}
+
+/* The whole card opens the record, not only the name. */
+.approved-list a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.approved-list span {
+  color: var(--slate);
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.record-page {
+  padding: 18px 20px 20px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-top: 2px solid var(--navy);
+  border-radius: 0 0 8px 8px;
+  background: var(--white);
+}
+
+.record-page ul {
+  font-size: 1rem;
+}
+
+.record-page ul:empty {
+  display: none;
+}
+
+.numbers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+  margin: 0;
+  border-top: 2px solid var(--navy);
+}
+
+.numbers div {
+  display: grid;
+  gap: 2px;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(19, 40, 58, 0.25);
+}
+
+.numbers dt {
+  order: 2;
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+.numbers dd {
+  margin: 0;
+  font-family: var(--slab);
+  font-size: 2rem;
+  line-height: 1.1;
+}
+
+@media (min-width: 700px) {
+  .numbers {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

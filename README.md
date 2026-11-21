@@ -92,6 +92,17 @@ The Services tab decides which services the website offers. Each row shows the a
 - The For companies page still lists every service, so a company can apply for one that is off. That is how a service gets its three tiers before it goes live.
 - The home page's top drawing uses a fence job as its example whichever services are on.
 
+### The public approved list
+
+`/approved` names the approved companies the owner has chosen to show, and `/approved?id=AV-1003` is one company's record page: the same lines a customer sees on its quote, plus its customer ratings. A company can link to its page from its own site, and anyone shown an approval can look the number up.
+
+- **Off until switched on.** A company's page under Partners has "Public record page". It starts off, because it puts the company's name in front of anyone. Turn it on once the company agrees.
+- **Only approved companies.** A paused company drops off the list that day and its number answers "not on the list".
+- **The numbers** (approved today, working toward approval, applied and not approved, taken off the list) count every company, named or not. They appear once at least one company is approved.
+- **Ratings.** Every rating counts toward a company's average, not only the ones a customer agreed to show, and the average appears from the third rating on. A customer's words show only when they agreed and the owner turned them on.
+
+The Our standard page says when a company comes off the list. Those three rules are a public promise: change the words in `site/standard.html` if the practice changes.
+
 ### Business details: one file
 
 `business.json` holds the phone number, the owner's name and role, the About paragraphs, the hours, the reply-time promise, and the email address. Every public page reads from it, both on the hub and in the static build. A detail left empty takes its sentence or section off the page, so nothing shows half filled.
@@ -128,7 +139,8 @@ The certification is AT Legacy Services' own. The certificate and the For compan
 - A scorecard's boxes are named after each item's wording, not its place in the list, so a scorecard opened before the standard changed can't tick the wrong item.
 - Each quote is in the partner's name. The site never sets a price.
 - A service the owner has switched off takes no new request, even from a page that was opened before the switch.
-- A rating is taken only for a request whose customer chose a company, and only once. It is public only when the customer agreed and the owner turned it on.
+- A rating is taken only for a request whose customer chose a company, and only once. Its words are public only when the customer agreed and the owner turned them on. Its stars always count toward the company's average.
+- A company is named on the public list only while it is approved and the owner has switched its public page on. The owner's own crew is never listed.
 - A contact message needs a name, a phone number or an email, and a message. Ten tries an hour from one connection.
 - The AI sees the job description only, never the customer's name, phone, or email. Any AI failure falls back to the plain brief.
 - AI briefs are capped at 300 a day across all visitors.
@@ -237,7 +249,8 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `site/uploads.js` | The "add" buttons for pictures and files: shrinks each picture, shows what was added, and sends it |
 | `site/partners.html`, `site/partners.js` | Partner application |
 | `site/about.html`, `site/privacy.html`, `site/terms.html` | About page, and the privacy and terms drafts |
-| `site/standard.html`, `site/standard.js` | The public standard, filled from the dashboard's standard |
+| `site/standard.html`, `site/standard.js` | The public standard, filled from the dashboard's standard, and the rules for coming off the list |
+| `site/approved.html`, `site/approved.js` | The public approved list, each company's record page, and the numbers |
 | `site/contact.html`, `site/contact.js` | Contact form. Messages land in the dashboard's Messages tab |
 | `business.json`, `server/lib/business.js` | The business's own details, and the helper that fills them into each page |
 | `server/index.js`, `server/app.js` | Server start-up and routing |
@@ -252,6 +265,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `server/lib/edge.js` | Checks the host's sign-in wall before the dashboard service opens |
 | `server/lib/links.js` | Names for private links, and the record of when each was sent and opened |
 | `server/lib/files.js` | Pictures and files: the limits, what may be stored, cleaning a picture, and who may see each file |
+| `server/lib/record.js` | The lines of a company's record, shared by quotes and the public list |
 | `server/lib/services.js` | Which services are switched off, and the rule that one stays on |
 | `server/lib/standard.js` | The certification standard: its starting draft, how a site visit is scored, and the tier the points suggest |
 | `server/lib/xlsx.js` | Writes the Excel downloads |

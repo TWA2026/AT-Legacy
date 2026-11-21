@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Approved companies | AT Legacy Services</title>
+  <meta name="description" content="The companies AT Legacy Services has checked and visited, each with its record: paperwork, site visit, and customer ratings.">
+  <meta name="theme-color" content="#13283A">
+  <link rel="canonical" href="https://atlegacyservices.com/approved">
+  <meta property="og:title" content="Approved companies | AT Legacy Services">
+  <meta property="og:description" content="The companies AT Legacy Services has checked and visited, each with its record: paperwork, site visit, and customer ratings.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://atlegacyservices.com/approved">
+  <meta property="og:image" content="https://atlegacyservices.com/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="preload" href="fonts/alfa-slab-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js" defer></script>
+  <script src="approved.js" defer></script>
+</head>
+<body>
+  <header class="quote-head">
+    <a class="brand" href="/" aria-label="AT Legacy Services, home"><img src="favicon.svg" alt="" width="44" height="44"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>
+    <h1 id="approved-title">Approved companies</h1>
+    <p id="approved-lead">Companies that passed our paperwork checks and a site visit. This is our own approval, not a state license.</p>
+  </header>
+
+  <main class="quote-main read">
+    <section class="read-part" id="approved-list-part">
+      <h2>On the list</h2>
+      <p class="form-note" id="approved-status" role="status">Loading the list.</p>
+      <ul class="approved-list" id="approved-list"></ul>
+      <p class="form-note" id="approved-unnamed" hidden></p>
+      <noscript><p class="form-note">The list needs JavaScript to load. Ask us and we&rsquo;ll send it.</p></noscript>
+    </section>
+
+    <section class="read-part" id="approved-record" hidden>
+      <h2 id="record-name"></h2>
+      <p id="record-line"></p>
+      <div class="quote-record record-page">
+        <ul id="record-items"></ul>
+        <p class="record-shown" id="record-shown-title" hidden>Shown at our visit</p>
+        <ul id="record-shown"></ul>
+      </div>
+      <p class="form-note" id="record-license" hidden>You can look up a Florida contractor&rsquo;s license yourself at <a href="https://www.myfloridalicense.com" rel="noopener">myfloridalicense.com</a>.</p>
+      <p id="record-ratings" hidden></p>
+      <ul class="review-list" id="record-reviews" hidden></ul>
+      <p class="done-actions"><a class="secondary" id="record-request" href="/quote">Start a request</a> <a class="secondary" href="/approved">See the whole list</a></p>
+    </section>
+
+    <section class="read-part" id="approved-missing" hidden>
+      <h2>Not on the list</h2>
+      <p>No company with that number is on our public list today. A company comes off when it stops meeting our standard, and some approved companies aren&rsquo;t named here.</p>
+      <p><a class="secondary" href="/approved">See the whole list</a></p>
+    </section>
+
+    <section class="read-part" id="approved-numbers" hidden>
+      <h2>Our numbers</h2>
+      <dl class="numbers">
+        <div><dt>Approved today</dt><dd id="n-approved"></dd></div>
+        <div><dt>Working toward approval</dt><dd id="n-working"></dd></div>
+        <div><dt>Applied and not approved</dt><dd id="n-not"></dd></div>
+        <div><dt>Taken off the list</dt><dd id="n-removed"></dd></div>
+      </dl>
+      <p class="form-note">Counted from our own records each time this page loads.</p>
+    </section>
+
+    <section class="read-part">
+      <h2>What an approval means</h2>
+      <p>We check a company&rsquo;s paperwork, visit one of its job sites or its shop, and score what we see against a written standard. A record shows only what we checked or saw ourselves. Nothing on it is the company&rsquo;s own claim.</p>
+      <p>If a company shows you an AT Legacy Services approval, look up its number here. This page on atlegacyservices.com is the proof.</p>
+      <p><a class="secondary" href="/standard">Read our standard</a></p>
+    </section>
+  </main>
+
+  <footer class="quote-foot">
+    <nav class="foot-links" aria-label="Footer">
+      <a href="/">Home</a>
+      <a href="/quote">Start a request</a>
+      <a href="/about">About</a>
+      <a href="/standard">Our standard</a>
+      <a href="/partners">For companies</a>
+      <a href="/contact">Contact</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </nav>
+    <p class="legal">&copy; 2026 AT Legacy Group LLC. Partner companies are independent. AT Legacy Services is not the contractor on their jobs.</p>
+  </footer>
+</body>
+</html>

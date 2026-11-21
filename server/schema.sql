@@ -92,6 +92,8 @@ create index if not exists link_events_link_idx on link_events (request_id, quot
 alter table partners add column if not exists visit jsonb not null default '{}';
 alter table partners add column if not exists approved_on text not null default '';
 alter table partners add column if not exists review_due text not null default '';
+-- Whether the company is named on the website's approved list. Off until the owner turns it on.
+alter table partners add column if not exists listed boolean not null default false;
 
 -- Pictures and files a customer adds to a request. See server/lib/files.js.
 create table if not exists request_files (

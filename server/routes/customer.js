@@ -1,10 +1,9 @@
 const express = require("express");
-const { esc, page, briefHtml, formatDate, formatDay } = require("../lib/html");
+const { esc, page, briefHtml, formatDate } = require("../lib/html");
 const { formatDollars } = require("../lib/validate");
 const { requestRef, customerPath, isOwnerPreview, recordOpen } = require("../lib/links");
 const { LIMITS, listFiles, loadFile, sendFile, galleryHtml, pickerHtml } = require("../lib/files");
-const { OWN_CREW_SERVICE, licenseCheck } = require("../lib/catalog");
-const { certificateNo } = require("../lib/standard");
+const record = require("../lib/record");
 
 const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the customer&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
@@ -38,25 +37,13 @@ const QUOTE_LINES = [
 
 // What we have on file about the company behind a quote. Every line is something the owner checked
 // or saw. Nothing here is the company's own claim.
-function recordItems(quote) {
-  if (quote.partner_trade === OWN_CREW_SERVICE) return ["Done by AT Legacy Services’ own crew"];
-  const items = [];
-  const visit = quote.visit && quote.visit.on ? quote.visit : null;
-  if (quote.approved_on) items.push("Approved vendor " + certificateNo(quote.partner_id) + ", since " + formatDay(quote.approved_on));
-  if (visit && visit.passed) items.push("Passed our site visit on " + formatDay(visit.on));
-  const license = licenseCheck(quote.partner_trade);
-  if (quote.check_license && license) items.push("License checked: " + license + (quote.license_no ? ", number " + quote.license_no : ""));
-  if (quote.check_insurance) items.push("Proof of liability insurance on file");
-  if (quote.check_references) items.push("Local references checked");
-  return items;
-}
-
-// The items past the basics that the company showed at its site visit. They are what set its tier.
-function shownAtVisit(quote) {
-  const visit = quote.visit && quote.visit.on && quote.visit.passed ? quote.visit : null;
-  if (!visit || quote.partner_trade === OWN_CREW_SERVICE) return [];
-  return (visit.items || []).filter((item) => item.kind === "points" && item.met).map((item) => item.label);
-}
+// (The lines themselves are built in lib/record.js, which the public approved list shares.)
+const companyOf = (quote) => ({
+  id: quote.partner_id, trade: quote.partner_trade, approved_on: quote.approved_on, visit: quote.visit,
+  check_license: quote.check_license, license_no: quote.license_no, check_insurance: quote.check_insurance, check_references: quote.check_references
+});
+const recordItems = (quote) => record.recordItems(companyOf(quote));
+const shownAtVisit = (quote) => record.shownAtVisit(companyOf(quote));
 
 function recordLists(quote) {
   const items = recordItems(quote);
@@ -80,7 +67,7 @@ function recordHtml(quote) {
 
 // A license the customer can look up on the state's own site: the ones the DBPR issues.
 function stateLicenseShown(quote) {
-  return quote.status === "submitted" && quote.check_license && quote.license_no && /^DBPR\b/.test(licenseCheck(quote.partner_trade));
+  return quote.status === "submitted" && record.stateLicense(companyOf(quote));
 }
 
 // Two or more quotes side by side, line by line. Shown on wide screens and on paper; a phone shows the cards.
@@ -121,7 +108,7 @@ function ratingSection(request) {
   const star = (n) => `<label class="choice"><input type="radio" name="stars" value="${n}" required> <span>${n} ${n === 1 ? "star" : "stars"}${n === 5 ? ", excellent" : ""}${n === 1 ? ", poor" : ""}</span></label>`;
   return `    <section class="app-section" id="rating">
       <h2>When the job is done</h2>
-      <p class="form-note">Come back to this page and tell us how ${esc(quote.company)} did. Your rating counts when we visit them again.</p>
+      <p class="form-note">Come back to this page and tell us how ${esc(quote.company)} did. Your stars count toward the company&rsquo;s average, and when we visit them again. Your words are shown only if you tick the box at the end.</p>
       <form class="quote-form rating-form" method="post" action="/r/${esc(request.token)}/rating">
         <fieldset class="form-part tier-part">
           <legend>How was the work?</legend>

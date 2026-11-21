@@ -120,7 +120,7 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
     // The public pages. Each names its stylesheet and scripts by fingerprint and is checked again on
     // every visit, so a new page never loads with a stylesheet a browser saved from an older one.
     const PAGES = { "/": "index.html", "/index.html": "index.html" };
-    for (const name of ["quote", "partners", "about", "standard", "contact", "privacy", "terms"]) {
+    for (const name of ["quote", "partners", "about", "standard", "approved", "contact", "privacy", "terms"]) {
       PAGES["/" + name] = name + ".html";
       PAGES["/" + name + ".html"] = name + ".html";
     }
