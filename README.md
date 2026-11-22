@@ -8,6 +8,8 @@ One Node app serves the public site, the request API, the private customer and p
 
 1. **Customer** fills in `site/quote.html`. The server turns the answers into a job brief (`POST /api/brief`). With an Anthropic API key, Claude writes the brief and may ask up to three follow-up questions. Without one, the brief is built from the answers.
 2. The customer checks the brief and sends it (`POST /api/requests`). They land on a private page, `/r/<token>`, where quotes appear.
+
+   The form asks for the ZIP code where the work is, and the city fills itself in from `site/zips.json` (Florida's ZIP codes). The customer can change the city, and types it when the ZIP isn't in the list. The request keeps the two as one line, such as "Land O’ Lakes 34638". The list is read from this site, so a ZIP code is never sent to an outside service to be looked up. The hub reads the same list (`server/lib/places.js`) to add the city when a request arrives with a ZIP alone.
 3. **Owner** opens the request in `/admin`, picks one approved partner per tier, and gets a private quote link, `/q/<token>`, to send to each partner.
 4. **Partner** opens the link, reads the brief, and enters a price. Partners see the job but not the customer's name or contact details.
 5. **Customer** compares the quotes and chooses one. Only then does the chosen partner's page show the customer's contact details. The customer hires and pays the partner directly.
@@ -294,6 +296,7 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `legacy-site/` | The earlier public site, kept as a fallback (`npm run build`) |
 | `site/index.html`, `site/home.js` | Home page, with its site plan drawing and service pictograms |
 | `site/quote.html`, `site/quote.js` | Request form and brief review |
+| `site/zips.json`, `server/lib/places.js` | Florida's ZIP codes and the city for each, for the request form. Taken from the `zipcodes` package by Dav Glass (BSD license), whose list came from federalgovernmentzipcodes.us, with a few names put the way they are written locally (Land O’ Lakes, St. Petersburg) |
 | `site/uploads.js` | The "add" buttons for pictures and files: shrinks each picture, shows what was added, and sends it |
 | `site/partners.html`, `site/partners.js` | Partner application |
 | `site/about.html`, `site/privacy.html`, `site/terms.html` | About page, and the privacy and terms drafts |

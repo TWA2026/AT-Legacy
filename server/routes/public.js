@@ -11,18 +11,32 @@ const { loadFee, shownFee } = require("../lib/fees");
 const { certificateNo } = require("../lib/standard");
 const { formatDay } = require("../lib/html");
 const record = require("../lib/record");
+const { cityOf } = require("../lib/places");
 
 const PROPERTIES = ["My home", "My rental property", "Other"];
 const TIMINGS = ["As soon as possible", "Within a month", "In 1 to 3 months", "I’m flexible"];
 const CONTACT_METHODS = ["Call", "Text", "Email"];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Where the work is, as one line: "Land O’ Lakes 34638". The form sends a ZIP code and a city.
+// The city is looked up when it didn't come with the ZIP. A page saved before the form had these
+// two fields sends one line of its own, which is taken as it is.
+function readPlace(body) {
+  const given = (name) => typeof body[name] === "string" && body[name].trim() !== "";
+  if (!given("zip") && !given("city") && given("location")) return text(body, "location", { max: 60, label: "ZIP code" });
+  const zip = text(body, "zip", { max: 10, label: "ZIP code" });
+  if (!/^\d{5}$/.test(zip)) throw new InputError("Enter a 5-digit ZIP code.");
+  const city = text(body, "city", { max: 40, required: false, label: "City" }) || cityOf(zip);
+  if (!city) throw new InputError("We couldn’t find that ZIP code. Check it, or add your city.");
+  return city + " " + zip;
+}
+
 function readJob(body) {
   const service = oneOf(body, "service", SERVICE_NAMES, "Service");
   const job = {
     service,
     property: oneOf(body, "property", PROPERTIES, "Property type"),
-    location: text(body, "location", { max: 60, label: "Neighborhood or ZIP code" }),
+    location: readPlace(body),
     timing: oneOf(body, "timing", TIMINGS, "Timing"),
     size: text(body, "size", { max: 80, required: false, label: "Size" }),
     details: text(body, "details", { max: 1000, label: "Job description" })

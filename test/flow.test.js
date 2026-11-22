@@ -2996,3 +2996,61 @@ test("repeated submissions from one connection are limited", async () => {
   for (let i = 0; i < 11; i += 1) attempt = await site.form("/admin/login", { password: "guess" + i });
   assert.equal(attempt.status, 429);
 });
+
+test("request: a ZIP code brings its city, and the two are kept as one line", async () => {
+  const site = await start();
+  const send = (door, place) => door.json("/api/requests", { ...JOB, ...CONTACT, location: "", ...place });
+  const saved = async (response) => {
+    assert.equal(response.status, 201);
+    const { url } = await response.json();
+    return (await pool.query("select location from requests where token = $1", [url.split("/")[2]])).rows[0].location;
+  };
+  // The ZIP and the city, as the form sends them.
+  assert.equal(await saved(await send(site, { zip: "34638", city: "Land O’ Lakes", location: "Land O’ Lakes 34638" })), "Land O’ Lakes 34638");
+  // The ZIP alone: the hub knows the city.
+  assert.equal(await saved(await send(site, { zip: "33544", city: "" })), "Wesley Chapel 33544");
+  assert.equal(await saved(await send(site, { zip: " 33701 " })), "St. Petersburg 33701");
+  // What the customer typed for the city is kept, whatever the list says.
+  assert.equal(await saved(await send(site, { zip: "34655", city: "Trinity", location: "something else" })), "Trinity 34655");
+  // A ZIP the list doesn't have is taken with a city, and asked about without one.
+  assert.equal(await saved(await send(site, { zip: "30301", city: "Atlanta" })), "Atlanta 30301");
+  // A page saved before the form had these two fields still sends one line of its own.
+  assert.equal(await saved(await send(site, { location: "Connerton" })), "Connerton");
+
+  const door = await start();
+  const refused = async (place, message) => {
+    const response = await send(door, place);
+    assert.equal(response.status, 400, JSON.stringify(place));
+    assert.equal((await response.json()).error, message);
+  };
+  await refused({ zip: "30301", city: "" }, "We couldn’t find that ZIP code. Check it, or add your city.");
+  for (const zip of ["3463", "346389", "3463a", "34638-1234"]) await refused({ zip, city: "Land O’ Lakes" }, "Enter a 5-digit ZIP code.");
+  await refused({ zip: "", city: "Land O’ Lakes" }, "ZIP code is required.");
+  await refused({ zip: "34638", city: "x".repeat(41) }, "City is too long.");
+  await refused({}, "ZIP code is required.");
+
+  // The brief a customer reviews before sending says the same place.
+  const brief = await site.json("/api/brief", { ...JOB, location: "", zip: "34639", city: "" });
+  assert.equal(brief.status, 200);
+  assert.match((await brief.json()).brief.summary, /^Fence for my home in Land O’ Lakes 34639\. /);
+
+  // The form asks for a ZIP code, then a city that fills itself in.
+  const form = fs.readFileSync(path.join(__dirname, "..", "site", "quote.html"), "utf8");
+  assert.match(form, /<label for="zip">ZIP code where the work is<\/label>\s*<input id="zip" name="zip" class="short" type="text" inputmode="numeric" autocomplete="postal-code" pattern="\[0-9\]\{5\}" maxlength="5" required>/);
+  assert.match(form, /<label for="city">City<\/label>\s*<input id="city" name="city" type="text" maxlength="40" autocomplete="address-level2" required aria-describedby="city-note">\s*<p class="help" id="city-note" aria-live="polite">We fill this in from your ZIP code\.<\/p>/);
+  assert.doesNotMatch(form, /name="location"|Neighborhood or ZIP/);
+
+  // The list is Florida's ZIP codes, served from the site itself so a ZIP is never sent elsewhere to be looked up.
+  const served = await site.get("/zips.json");
+  assert.equal(served.status, 200);
+  assert.match(served.headers.get("content-type"), /^application\/json/);
+  const list = await served.json();
+  const zips = Object.keys(list);
+  assert.ok(zips.length > 1400 && zips.every((zip) => /^3[2-4]\d{3}$/.test(zip)));
+  assert.ok(Object.values(list).every((city) => typeof city === "string" && city.trim() === city && city.length >= 3 && city.length <= 40));
+  assert.deepEqual(["34637", "34638", "34639", "33558", "33544", "34655", "33701", "33602", "33574"].map((zip) => list[zip]),
+    ["Land O’ Lakes", "Land O’ Lakes", "Land O’ Lakes", "Lutz", "Wesley Chapel", "New Port Richey", "St. Petersburg", "Tampa", "St. Leo"]);
+  const script = fs.readFileSync(path.join(__dirname, "..", "site", "quote.js"), "utf8");
+  assert.match(script, /fetch\("\/zips\.json"\)/);
+  assert.doesNotMatch(script, /https?:\/\/[^"']*zip/i, "no outside ZIP code service");
+});

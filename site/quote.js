@@ -135,11 +135,79 @@
     errorBox.hidden = true;
   });
 
+  // The city fills itself in from the ZIP code. The list (Florida's ZIP codes) is fetched the first
+  // time the ZIP field is used, from this site, so the ZIP is never sent anywhere to look it up.
+  var zipField = form.elements.zip;
+  var cityField = form.elements.city;
+  var cityNote = document.getElementById("city-note");
+  var cities = null;
+  var citiesAsked = false;
+  // The city this page put in the field. Empty once the customer has typed their own, which is then left alone.
+  var filledCity = "";
+
+  function fillCity() {
+    var zip = zipField.value;
+    var ours = !cityField.value || cityField.value === filledCity;
+    if (zip.length < 5) {
+      if (filledCity && cityField.value === filledCity) cityField.value = "";
+      filledCity = "";
+      if (!cityField.value) cityNote.textContent = "We fill this in from your ZIP code.";
+      return;
+    }
+    if (!cities) return;
+    var city = Object.prototype.hasOwnProperty.call(cities, zip) ? cities[zip] : "";
+    if (city && ours) {
+      cityField.value = city;
+      filledCity = city;
+      cityNote.textContent = "From your ZIP code. Change it if it’s wrong.";
+    } else if (!city) {
+      if (filledCity && cityField.value === filledCity) cityField.value = "";
+      filledCity = "";
+      cityNote.textContent = cityField.value ? "" : "We couldn’t find that ZIP code. Check it, or type your city.";
+    }
+  }
+
+  function loadCities() {
+    if (citiesAsked) return;
+    citiesAsked = true;
+    fetch("/zips.json").then(function (response) {
+      if (!response.ok) throw new Error("no list");
+      return response.json();
+    }).then(function (list) {
+      cities = list;
+      fillCity();
+    }).catch(function () {
+      // No list this time: the customer types the city, and the next keystroke asks again.
+      citiesAsked = false;
+    });
+  }
+
+  zipField.addEventListener("focus", loadCities);
+  zipField.addEventListener("input", function () {
+    var digits = zipField.value.replace(/\D/g, "").slice(0, 5);
+    if (digits !== zipField.value) zipField.value = digits;
+    loadCities();
+    fillCity();
+  });
+  cityField.addEventListener("input", function () {
+    if (cityField.value === filledCity) return;
+    filledCity = "";
+    cityNote.textContent = "";
+  });
+
+  // "Land O’ Lakes 34638": the one line the request carries for where the work is.
+  function place() {
+    return [value("city"), value("zip")].filter(Boolean).join(" ");
+  }
+
   function job() {
     return {
       service: value("service"),
       property: value("property"),
-      location: value("location"),
+      zip: value("zip"),
+      city: value("city"),
+      // For a hub that hasn't been updated yet, which reads this one line.
+      location: place(),
       timing: value("timing"),
       size: value("size"),
       details: value("details"),
@@ -151,6 +219,7 @@
     var missing = form.querySelector("input:invalid, select:invalid, textarea:invalid");
     if (missing) {
       missing.focus();
+      if (missing.name === "zip" && missing.value) return "Enter a 5-digit ZIP code.";
       return missing.type === "email" && missing.value ? "Enter a valid email address." : "Fill in every field that isn’t marked optional.";
     }
     if (value("contact") === "Email" && !value("email")) {
@@ -206,7 +275,7 @@
 
     briefList.textContent = "";
     row("Service", value("service"));
-    row("Where", value("location"));
+    row("Where", place());
     row("Timing", value("timing"));
     if (value("size")) row("Size or how often", value("size"));
     row("The job", theJob);

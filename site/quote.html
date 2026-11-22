@@ -227,8 +227,14 @@
           </div>
 
           <div class="field">
-            <label for="location">Neighborhood or ZIP code</label>
-            <input id="location" name="location" type="text" maxlength="60" required>
+            <label for="zip">ZIP code where the work is</label>
+            <input id="zip" name="zip" class="short" type="text" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}" maxlength="5" required>
+          </div>
+
+          <div class="field">
+            <label for="city">City</label>
+            <input id="city" name="city" type="text" maxlength="40" autocomplete="address-level2" required aria-describedby="city-note">
+            <p class="help" id="city-note" aria-live="polite">We fill this in from your ZIP code.</p>
           </div>
 
           <div class="field">

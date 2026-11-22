@@ -1837,6 +1837,11 @@ html {
   font: inherit;
 }
 
+/* A field for a few characters, such as a ZIP code, doesn't need the full width. */
+.field input.short {
+  max-width: 11rem;
+}
+
 .field select {
   padding-right: 42px;
   -webkit-appearance: none;
