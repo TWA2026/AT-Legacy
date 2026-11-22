@@ -42,6 +42,12 @@ async function sharedFiles(pool, quote) {
   return files.filter((file) => file.sharing === "shared").map((file) => ({ ...file, shown: names.get(file.id) }));
 }
 
+// How many documents are still waiting for the owner's OK. Only the owner's own look at this page is told.
+async function heldFiles(pool, quote) {
+  if (!canSeeFiles(quote)) return 0;
+  return (await listFiles(pool, quote.r_id)).filter((file) => file.sharing === "review").length;
+}
+
 // The answers a company can give about a permit. The customer sees them side by side.
 const PERMITS = ["We pull the permit, and it is in the price", "We pull the permit, and its cost is extra", "No permit is needed", "Not sure yet"];
 
@@ -116,7 +122,7 @@ function feeDue(invoice) {
       </div>`;
 }
 
-function render(quote, error, ownerPreview, files = [], invoice = null) {
+function render(quote, error, ownerPreview, files = [], invoice = null, held = 0) {
   const won = quote.chosen_quote_id === quote.id;
   const decided = quote.request_status === "chosen" || quote.request_status === "closed";
   const ownCrew = quote.tier === OWN_CREW_TIER;
@@ -159,11 +165,12 @@ function render(quote, error, ownerPreview, files = [], invoice = null) {
     <section class="app-section">
       <h2>The job</h2>
       ${briefHtml({ service: quote.service, location: quote.location, property: quote.property, timing: quote.timing, size: quote.size, brief: quote.brief, answers: quote.answers })}
-    </section>${files.length ? `
+    </section>${files.length || (ownerPreview && held) ? `
     <section class="app-section" id="files">
-      <h2>Pictures from the customer</h2>
+      <h2>Pictures from the customer</h2>${files.length ? `
       <p class="form-note">Tap a picture to see it full size.</p>
-      ${galleryHtml(files, { base: "/q/" + quote.token + "/files", label: (file) => file.shown, theirs: true })}
+      ${galleryHtml(files, { base: "/q/" + quote.token + "/files", label: (file) => file.shown, theirs: true })}` : ""}${ownerPreview && held ? `
+      <p class="owner-preview"><strong>Only you see this note.</strong> ${held === 1 ? "1 document from the customer isn&rsquo;t" : held + " documents from the customer aren&rsquo;t"} on this page. ${held === 1 ? "It is" : "They are"} waiting for your OK. Open this request in your dashboard and choose Share with companies.</p>` : ""}
     </section>` : ""}`
   });
 }
@@ -179,7 +186,8 @@ module.exports = function partnerRoutes({ pool, config, notify = async () => fal
       await recordOpen(pool, req, { requestId: quote.r_id, quoteId: quote.id });
       // A job this company won carries an invoice for its fee.
       const invoice = quote.chosen_quote_id === quote.id && Number(quote.fee_percent) > 0 ? await invoiceForQuote(pool, config, quote.id) : null;
-      res.send(render(quote, "", isOwnerPreview(req), await sharedFiles(pool, quote), invoice));
+      const ownerPreview = isOwnerPreview(req);
+      res.send(render(quote, "", ownerPreview, await sharedFiles(pool, quote), invoice, ownerPreview ? await heldFiles(pool, quote) : 0));
     } catch (error) {
       next(error);
     }

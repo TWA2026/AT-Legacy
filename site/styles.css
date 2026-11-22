@@ -4042,7 +4042,8 @@ html {
   max-width: 640px;
 }
 
-.fee-row .link-note.needs-you {
+.fee-row .link-note.needs-you,
+.quote-card .link-note.needs-you {
   padding-left: 10px;
   border-left: 4px solid var(--gold);
   color: var(--navy);

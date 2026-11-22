@@ -1021,10 +1021,11 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   detail = await see("/admin/requests/" + row.id);
   // The link ends with the request's reference, the tier, and the company. Never the customer's name.
   const link = "https://example.test/q/" + quote.token + "/r" + (1000 + row.id) + "-affordable-budget-i-fence-i";
-  const said = "AT Legacy Services has a fence job for you to quote in 34637. The details and your quote form are here:";
+  // The message and the email's subject carry our reference, so the company can tell which job it is about.
+  const said = "AT Legacy Services has a fence job for you to quote in 34637. Our reference is R" + (1000 + row.id) + ". The details and your quote form are here:";
   assert.ok(detail.includes('href="sms:8135550199?&amp;body=' + encodeURIComponent(said + " " + link) + '" data-track-event="texted">Text it to Pat</a>'));
   // The typed email can't add recipients or text of its own: everything after the @ stays part of the address.
-  assert.ok(detail.includes('href="mailto:pat@example.test%3Fcc%3Dx%26body%3Dhi?subject=' + encodeURIComponent("Fence job to quote") + "&amp;body=" + encodeURIComponent(said + "\n\n" + link) + '" data-track-event="emailed">Email it to Pat</a>'));
+  assert.ok(detail.includes('href="mailto:pat@example.test%3Fcc%3Dx%26body%3Dhi?subject=' + encodeURIComponent("Job R" + (1000 + row.id) + " to quote: Fence (AT Legacy Services)") + "&amp;body=" + encodeURIComponent(said + "\n\n" + link) + '" data-track-event="emailed">Email it to Pat</a>'));
   assert.ok(detail.includes('<a href="' + link + '?owner=1" target="_blank" rel="noopener">Open the company’s page</a>'));
   assert.ok(detail.includes("Ends in <strong>r" + (1000 + row.id) + "-affordable-budget-i-fence-i</strong>"));
   assert.ok(detail.includes('data-share-url="' + link + '"'));
@@ -1402,6 +1403,10 @@ test("pictures and files: sent by the customer, cleaned, and shown only to the r
   assert.match(ownerPage, /<section class="app-section" id="files">/);
   assert.ok(ownerPage.includes("Dana &lt;b&gt;back yard.jpg") && !ownerPage.includes("<b>back") && ownerPage.includes("Smith survey.pdf"));
   assert.match(ownerPage, /class="file-state needs-you">No company can see this until you decide\./);
+  // It is said at the top of the request too, before any link is sent.
+  const heldTop = '<p class="owner-next needs-you" id="held-files"><strong>Waiting for your OK:</strong> 1 document from the customer. No company can see it until you share it. <a class="plain-link" href="#files">Check it now</a></p>';
+  assert.ok(ownerPage.includes(heldTop));
+  assert.doesNotMatch(ownerPage, /can&rsquo;t see 1 document yet/, "no company has a link yet");
   const ownerFile = "/admin/requests/" + row.id + "/files/";
   assert.equal((await site.get(ownerFile + saved[2].id, cookie)).status, 200);
   assert.equal((await site.get(ownerFile + saved[2].id)).status, 303, "signed out: sent to the login page");
@@ -1425,6 +1430,24 @@ test("pictures and files: sent by the customer, cleaned, and shown only to the r
   assert.equal(shownPicture.status, 200);
   assert.equal(shownPicture.headers.get("content-disposition"), 'inline; filename="Picture 1.jpg"');
   assert.equal((await site.get(companyUrl + "/files/" + saved[2].id)).status, 404, "the document is not shared yet");
+  // Where the owner sends each company its link, the dashboard says that company is missing a document.
+  let sending = await (await site.get("/admin/requests/" + row.id, cookie)).text();
+  assert.ok(sending.includes(heldTop));
+  for (const company of ["Budget Fence LLC", "Crown Fence &amp; Gate"]) {
+    assert.ok(sending.includes('<p class="link-note needs-you">' + company + ' can&rsquo;t see 1 document yet. <a class="plain-link" href="#files">Check it</a></p>'), company);
+  }
+  // The company's page says nothing about it. The owner's own look at that page does.
+  const heldSays = "<strong>Only you see this note.</strong> 1 document from the customer isn&rsquo;t on this page. It is waiting for your OK. Open this request in your dashboard and choose Share with companies.";
+  assert.doesNotMatch(companyPage, /Only you see this note|waiting for your OK/);
+  let ownerLook = await (await site.get(companyUrl + "?owner=1")).text();
+  assert.ok(ownerLook.includes('<p class="owner-preview">' + heldSays + "</p>"));
+  assert.ok(ownerLook.includes('alt="Picture 1"') && !/Dana|Smith|survey|Document 1/.test(ownerLook), "the note names nothing");
+  // With nothing shared and one document held, the company sees no pictures section, and the owner's look shows the note alone.
+  await pool.query("update request_files set sharing = 'private' where id = any($1::int[])", [[saved[0].id, saved[1].id]]);
+  assert.doesNotMatch(await (await site.get(companyUrl)).text(), /Pictures from the customer|Only you see this note/);
+  ownerLook = await (await site.get(companyUrl + "?owner=1")).text();
+  assert.ok(ownerLook.includes(heldSays) && !ownerLook.includes("Tap a picture") && !ownerLook.includes('alt="Picture'));
+  await pool.query("update request_files set sharing = 'shared' where id = any($1::int[])", [[saved[0].id, saved[1].id]]);
   const elsewhere = await createRequest(site, { name: "Third Person" });
   assert.equal((await site.form("/admin/requests/" + elsewhere.row.id + "/invite", { csrf: admin.csrf, partner: String(budget.id), tier: "Affordable" }, cookie)).status, 303);
   const otherQuote = (await pool.query("select token from quotes where request_id = $1", [elsewhere.row.id])).rows[0];
@@ -1448,6 +1471,10 @@ test("pictures and files: sent by the customer, cleaned, and shown only to the r
   assert.equal(sharedSurvey.headers.get("content-disposition"), 'attachment; filename="Document 1.pdf"');
   assert.equal((await site.get(companyUrl + "/files/" + saved[1].id)).status, 404, "the picture the owner held back");
   assert.doesNotMatch(await (await site.get("/admin", cookie)).text(), /to check before any company/);
+  // Once the owner has decided, nothing is left to say.
+  sending = await (await site.get("/admin/requests/" + row.id, cookie)).text();
+  assert.doesNotMatch(sending, /Waiting for your OK|can&rsquo;t see \d+ documents? yet/);
+  assert.doesNotMatch(await (await site.get(companyUrl + "?owner=1")).text(), /Only you see this note/);
   assert.match(await (await site.get(url)).text(), /Smith survey\.pdf[\s\S]*Shared with the companies quoting\./);
 
   // The customer takes a picture back, and adds until the request is full.

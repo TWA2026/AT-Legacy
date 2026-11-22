@@ -404,6 +404,14 @@ ${rows}
       const fileBase = "/admin/requests/" + r.id + "/files";
       const SHARING_SAYS = { shared: "Companies quoting can see this.", review: "No company can see this until you decide.", private: "Kept private. No company can see this." };
       const shareButton = (to, label) => `<button class="text-button" type="submit" name="sharing" value="${to}">${label}</button>`;
+      // A document waits for the owner's OK before any company sees it. Say so where the links are sent from,
+      // so a company isn't sent to a page that is missing something the customer added.
+      const held = r.status === "closed" ? 0 : files.filter((file) => file.sharing === "review").length;
+      const it = held === 1 ? "it" : "them";
+      const heldTop = held ? `
+    <p class="owner-next needs-you" id="held-files"><strong>Waiting for your OK:</strong> ${plural(held, "document", "documents")} from the customer. No company can see ${it} until you share ${it}. <a class="plain-link" href="#files">Check ${it} now</a></p>` : "";
+      const heldNote = (company) => (held ? `
+          <p class="link-note needs-you">${esc(company)} can&rsquo;t see ${plural(held, "document", "documents")} yet. <a class="plain-link" href="#files">Check ${it}</a></p>` : "");
       const gallery = galleryHtml(files, {
         base: fileBase,
         theirs: true,
@@ -437,7 +445,7 @@ ${rows}
           <p class="quote-company">${esc(quote.company)}</p>
           <p>${pill(quote.status)}${chosen ? " " + pill("chosen") : ""}</p>
           ${quote.status === "submitted" ? `<p class="quote-price">${esc(formatDollars(quote.amount_cents))}</p>
-          <dl class="quote-facts"><dt>Included</dt><dd>${esc(quote.includes)}</dd><dt>Timeline</dt><dd>${esc(quote.timeline)}</dd>${quote.warranty ? `<dt>Warranty</dt><dd>${esc(quote.warranty)}</dd>` : ""}</dl>` : ""}
+          <dl class="quote-facts"><dt>Included</dt><dd>${esc(quote.includes)}</dd><dt>Timeline</dt><dd>${esc(quote.timeline)}</dd>${quote.warranty ? `<dt>Warranty</dt><dd>${esc(quote.warranty)}</dd>` : ""}</dl>` : ""}${heldNote(quote.company)}
           ${linkRow({
             id: "link-" + quote.id,
             label: "Partner&rsquo;s quote link",
@@ -445,8 +453,9 @@ ${rows}
             textTo: quote.partner_phone,
             emailTo: quote.partner_email,
             who: firstName(quote.contact_name),
-            subject: r.service + " job to quote",
-            message: "AT Legacy Services has a " + r.service.toLowerCase() + " job for you to quote in " + r.location + ". The details and your quote form are here:",
+            // The reference comes first, so the company can find this job again in its inbox.
+            subject: "Job " + requestRef(r.id) + " to quote: " + r.service + " (AT Legacy Services)",
+            message: "AT Legacy Services has a " + r.service.toLowerCase() + " job for you to quote in " + r.location + ". Our reference is " + requestRef(r.id) + ". The details and your quote form are here:",
             open: "Open the company’s page",
             track: { request: r.id, quote: quote.id },
             activity: activity.company(quote.id)
@@ -464,7 +473,7 @@ ${rows}
         title: r.service + " request",
         heading: r.service + " for " + r.name,
         intro: "Reference " + requestRef(r.id) + ". Received " + formatDate(r.created_at) + ". " + (STATUS_LABELS[r.status] || r.status) + ".",
-        body: `    <p class="owner-next${step.needsYou ? " needs-you" : ""}"><strong>Next:</strong> ${esc(step.long)}</p>
+        body: `    <p class="owner-next${step.needsYou ? " needs-you" : ""}"><strong>Next:</strong> ${esc(step.long)}</p>${heldTop}
     <section class="app-section">
       <h2>Quotes</h2>
       <p class="form-note">Each company gets its own link. Its page shows the job brief and a form for their price. It never shows the customer&rsquo;s name or number. Every link ends with this request&rsquo;s reference and who it is for, so you can check it before you send it.</p>
