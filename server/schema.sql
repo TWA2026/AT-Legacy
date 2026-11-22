@@ -151,3 +151,64 @@ create table if not exists ratings (
   seen boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+-- Invoices: the ledger of finder's fees. One is issued when a customer chooses a company that owes a
+-- fee. Each keeps its own copy of what it bills, so it stays in the books after its request is
+-- deleted, and it holds nothing about the customer. A number is never used twice.
+-- See server/lib/invoices.js for what open, paid, refunded and void mean.
+create sequence if not exists invoice_number_seq start 1001;
+
+create table if not exists invoices (
+  id serial primary key,
+  -- Shown as INV-1001.
+  number integer not null unique,
+  -- Opens the company's invoice page: /q/invoice/<token>
+  token text not null unique,
+  quote_id integer references quotes(id) on delete set null,
+  -- Not a foreign key: the invoice outlives its request.
+  request_id integer,
+  partner_id integer references partners(id) on delete set null,
+  -- False once the customer's choice was undone or the request was deleted while the invoice was
+  -- unpaid. A quote has at most one current invoice.
+  current boolean not null default true,
+  company text not null,
+  service text not null,
+  tier text not null default '',
+  -- The request's reference, such as R1004.
+  job_ref text not null,
+  quoted_cents bigint not null,
+  fee_percent numeric(5,2) not null,
+  fee_min_cents integer not null default 0,
+  fee_max_cents integer not null default 0,
+  amount_cents bigint not null,
+  issued_at timestamptz not null default now(),
+  due_at timestamptz not null,
+  paid_at timestamptz,
+  -- How it was paid, in words: Zelle, Check, Card through Stripe, and so on.
+  paid_how text not null default '',
+  -- What the payment service kept, when it is known.
+  processor_fee_cents integer,
+  refunded_cents bigint not null default 0,
+  refunded_at timestamptz,
+  voided_at timestamptz,
+  void_reason text not null default '',
+  -- A bank payment was started on Stripe and has not finished yet.
+  pending_since timestamptz,
+  -- Something the owner and the company should know about the last try, such as a failed bank payment.
+  payment_note text not null default '',
+  stripe_session_id text not null default '',
+  stripe_session_url text not null default '',
+  stripe_session_expires timestamptz,
+  stripe_payment_intent text not null default '',
+  stripe_charge text not null default '',
+  stripe_checked_at timestamptz,
+  -- How the owner last sent it, and how often the company opened it.
+  sends integer not null default 0,
+  last_send text not null default '',
+  last_sent_at timestamptz,
+  opens integer not null default 0,
+  last_opened_at timestamptz
+);
+
+create unique index if not exists invoices_current_quote on invoices (quote_id) where current and quote_id is not null;
+create index if not exists invoices_request_idx on invoices (request_id);

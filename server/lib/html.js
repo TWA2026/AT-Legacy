@@ -125,6 +125,42 @@ function certificatePage({ company, service, number, approved, validThrough, bac
 </html>`;
 }
 
+// An invoice or receipt for a finder's fee, as the company sees it. Like the certificate, it stands
+// alone so it prints or saves as a PDF cleanly. `body` is built by server/routes/invoice.js.
+function invoicePage({ title, heading, number, body, notice = "" }) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${esc(title)} | AT Legacy Services</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#13283A">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="${STYLES}">
+  <script src="${SCRIPT}" defer></script>
+</head>
+<body class="invoice-page">
+  ${notice}
+  <p class="invoice-actions"><button class="secondary" type="button" data-print>Print or save as a PDF</button></p>
+  <main class="invoice">
+    <header class="invoice-head">
+      <p class="lockup">
+        <span class="lockup-name">AT LEGACY</span>
+        <span class="pinstripe" aria-hidden="true"></span>
+        <span class="lockup-sub">SERVICES</span>
+      </p>
+      <div class="invoice-title">
+        <h1>${esc(heading)}</h1>
+        <p class="invoice-number">${esc(number)}</p>
+      </div>
+    </header>
+${body}
+  </main>
+</body>
+</html>`;
+}
+
 function briefHtml(request) {
   const brief = request.brief || {};
   const scope = (brief.scope || []).map((item) => `<li>${esc(item)}</li>`).join("");
@@ -160,4 +196,4 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
 }
 
-module.exports = { esc, page, ownerPage, certificatePage, briefHtml, formatDate, formatDateTime, formatDay };
+module.exports = { esc, page, ownerPage, certificatePage, invoicePage, briefHtml, formatDate, formatDateTime, formatDay };

@@ -11,24 +11,58 @@ One Node app serves the public site, the request API, the private customer and p
 3. **Owner** opens the request in `/admin`, picks one approved partner per tier, and gets a private quote link, `/q/<token>`, to send to each partner.
 4. **Partner** opens the link, reads the brief, and enters a price. Partners see the job but not the customer's name or contact details.
 5. **Customer** compares the quotes and chooses one. Only then does the chosen partner's page show the customer's contact details. The customer hires and pays the partner directly.
-6. **Owner** bills the finder's fee from `/admin/fees`. The fee is a percentage of the quoted price with a smallest and a largest amount (5%, $25, $750 to start), set under Fee settings. Each brief keeps the terms it was sent with.
+6. **The site** issues a numbered invoice for the finder's fee the moment the customer chooses. The fee is a percentage of the quoted price with a smallest and a largest amount (5%, $25, $750 to start), set under Fee settings. Each brief keeps the terms it was sent with.
+7. **Owner** sends the invoice from `/admin/fees`. The company opens it at `/q/invoice/<token>` and pays there. With Stripe connected the invoice marks itself paid. See "Invoices and getting paid" below.
 
 Repairs and upkeep go to the in-house "AT Legacy Services" partner record as a single quote with no fee.
 
 ## The dashboard
 
-Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "Owner dashboard" strip, a compact bar, and four tabs. Pages for customers and companies use `page()` and never show the strip, so the owner can tell at a glance which pages are theirs.
+Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "Owner dashboard" strip, a compact bar, and the tabs. Pages for customers and companies use `page()` and never show the strip, so the owner can tell at a glance which pages are theirs.
 
 | Tab | What it shows |
 | --- | --- |
 | Requests | What needs the owner, then every request with its next step. Requests that need a company come first |
 | Partners | The approved vendor list, the companies working toward it, the standard, and the sign-up link to send to a new company |
 | Services | A switch for each service, beside how many approved companies it has in each tier. Off takes the service off the website |
-| Fees | One row per awarded job: the fee and how it was worked out, a bill to copy, text, or email with the owner's payment link, and switches for paid and no fee. Fee settings holds the rule and the payment link |
+| Fees | Every invoice, in four parts: overdue, waiting to be paid, paid, and no fee. An unpaid one carries the words and link to copy, text, or email, and a record of when it was sent and opened. Fee settings holds the rule, the payment link, and what Stripe last reported. Books has a month-by-month summary and the Excel files |
 | Messages | What people send from the Contact page, newest first, with a tap to call or email back |
 | Links | Every fixed page of the site with its address, and who each one is for |
 
 On a request, each private link has a Copy button plus one-tap ways to send it: text, email, the phone's share sheet, or open it to see what the other person sees. The text and email links are built only from digits and an encoded address (`textLink` and `emailLink` in `server/routes/admin.js`), so nothing typed into a form can change where they go.
+
+### Invoices and getting paid
+
+An invoice is issued when a customer chooses a company that owes a fee (`issueMissing` in `server/lib/invoices.js`). It gets the next number, `INV-1001` and up, and a private page of its own. A number is never used twice, and an invoice is never deleted.
+
+| It is | When |
+| --- | --- |
+| Open | Issued and not paid. It is overdue from the day after its due day, and its row then carries a reminder instead of the first message |
+| Paid | The owner ticked **Fee paid**, or Stripe reported the payment |
+| Refunded | It was paid and the money went back: the owner ticked **No fee on this job** on a paid invoice, or refunded it in Stripe |
+| No fee | The owner ticked **No fee on this job** on an unpaid invoice, or the customer's choice was undone, or the request was deleted |
+
+Each invoice keeps its own copy of what it bills: the company, the job's reference, the service, the quoted price, and the terms. It never holds the customer's name. That is why it can stay in the books after the owner deletes a request at a customer's asking. Undoing a choice or deleting a request cancels an unpaid invoice for good. A paid one stays paid, and the owner decides whether to refund it.
+
+The company's page, `/q/invoice/<token>`, is the invoice while the fee is owed and the receipt once it is paid. It prints on one page. How the company pays from it depends on what is set up:
+
+- **Stripe connected:** a Pay button for the exact amount. It opens a payment page that Stripe hosts, made for that one invoice.
+- **Only a payment link saved** (Fee settings): a Pay online button that opens the owner's link, where the company types the amount.
+- **Neither:** the page says the payment details will follow, and the owner marks the fee paid by hand.
+
+**Connecting Stripe.** Add one secret, `STRIPE_SECRET_KEY`, to the `hub` service in Slipway and deploy. A restricted key is enough and is what Stripe recommends. Create it in Stripe under API keys with these permissions:
+
+| Permission | Level | What it is for |
+| --- | --- | --- |
+| Checkout Sessions | Write | Making the payment page and reading how it ended |
+| Charges and Refunds | Read | Whether it was a card or a bank payment, and noticing a refund made in Stripe |
+| Balance | Read | What Stripe kept from each payment, for the books |
+
+The last two are optional: without them a payment is still marked paid. The key is read from the environment only. It is never written to the database, a page, or a log, and the dashboard service never uses it. Fee settings shows what the hub last reported: connected or not, test or live, what the key may do, and the last problem in plain words.
+
+No address has to be registered with Stripe. The hub asks Stripe how each payment page ended: when the company comes back from paying, and once a minute for every invoice with a payment page out (`server/lib/payments.js`, started in `server/index.js`). A bank payment takes a few business days, so the invoice says it is on its way until the money lands. A payment for any amount other than the invoice's is never accepted as payment of it. A payment page is closed once its invoice is marked paid by hand or marked no fee, so the same invoice can't be paid twice. A card or bank number never reaches this app.
+
+**Books.** `/admin/fees/books` lists each month with what was billed, collected, and kept by the payment service, and offers an Excel file for a month, a year, or everything. Each file has three sheets: a summary, every payment and refund, and every invoice. Money counts in the month it moved.
 
 ### Private links: names and history
 
@@ -147,6 +181,9 @@ The certification is AT Legacy Services' own. The certificate and the For compan
 - A partner can be approved only after the registration, insurance, and references checks are ticked, plus the license check when the trade needs one (`server/lib/catalog.js`), and after a site visit that meets every must-meet item of the standard. The owner's own crew is exempt.
 - A scorecard's boxes are named after each item's wording, not its place in the list, so a scorecard opened before the standard changed can't tick the wrong item.
 - Each quote is in the partner's name. The site never sets a price.
+- An invoice is issued only for a quote the customer chose, and a quote has at most one invoice that isn't cancelled. Its amount is fixed when it is issued.
+- An invoice is marked paid through Stripe only when Stripe reports a payment of exactly that amount, on the payment page this site made for that invoice.
+- A cancelled invoice can't be reopened or paid from its page. A payment Stripe reported can't be unticked by hand.
 - A service the owner has switched off takes no new request, even from a page that was opened before the switch.
 - A rating is taken only for a request whose customer chose a company, and only once. Its words are public only when the customer agreed and the owner turned them on. Its stars always count toward the company's average.
 - A company is named on the public list only while it is approved and the owner has switched its public page on. The owner's own crew is never listed.
@@ -167,6 +204,7 @@ Set these on the service's **Environment** tab in Slipway (see `.env.example`).
 | `ANTHROPIC_API_KEY` | No | Turns on the AI review |
 | `AI_MODEL` | No | Defaults to `claude-haiku-5-5` |
 | `FEE_PERCENT` | No | The starting percentage for the finder's fee, until the owner saves a rule under Fees, then Fee settings. Defaults to 5 |
+| `STRIPE_SECRET_KEY` | No | A Stripe restricted key (`rk_live_...`) or secret key, set as a secret on the `hub` service only. Turns on the Pay button on invoices and marks them paid. See "Invoices and getting paid" |
 | `PUBLIC_URL` | Recommended | The hub's public address, such as `https://atlegacyservices.com`. Used for the sign-in redirect, for links copied from the dashboard, and to keep sign-in cookies HTTPS-only. Defaults to the address you opened the dashboard on |
 | `RESEND_API_KEY`, `NOTIFY_FROM`, `NOTIFY_TO` | No | Emails you when a request, application, message, quote, site-visit request, choice, rating, or document to check arrives. With the first two set, a customer who gave an email also gets their private link by email |
 | `SITE_ORIGINS` | With a static copy | Comma-separated addresses whose pages may send forms to this hub, such as `https://atlegacyservices.com` |
@@ -267,7 +305,11 @@ After that the private pages are on the domain too, and the `at-legacy` service,
 | `server/routes/public.js` | Request, brief, and application API |
 | `server/routes/customer.js` | Customer's private quotes page |
 | `server/routes/partner.js` | Partner's private quote page |
-| `server/routes/admin.js` | Dashboard: requests, partners, site visits, the standard, fees |
+| `server/routes/invoice.js` | A company's invoice and receipt page, and the step that sends it to Stripe to pay |
+| `server/routes/admin.js` | Dashboard: requests, partners, site visits, the standard, fees, invoices, books |
+| `server/lib/fees.js` | The fee rule: the percentage with its smallest and largest amount |
+| `server/lib/invoices.js` | Invoices: issuing, what open, paid, refunded and no fee mean, and the sums for the books |
+| `server/lib/payments.js` | Stripe: the payment page for an invoice, and asking how it ended |
 | `server/lib/brief.js` | Plain and AI job briefs |
 | `server/lib/catalog.js` | Services, tiers, and which license each service needs |
 | `server/lib/workos.js` | WorkOS AuthKit sign-in for the dashboard |

@@ -80,4 +80,4 @@ async function loadActivity(pool, requestIds) {
   };
 }
 
-module.exports = { SEND_EVENTS, slug, requestRef, customerPath, companyPath, isOwnerPreview, recordOpen, loadActivity };
+module.exports = { SEND_EVENTS, slug, requestRef, customerPath, companyPath, isOwnerPreview, isPersonOpening, recordOpen, loadActivity };

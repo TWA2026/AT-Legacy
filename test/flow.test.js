@@ -39,6 +39,7 @@ async function start(env = {}, fetchImpl) {
   const base = "http://127.0.0.1:" + server.address().port;
   return {
     base,
+    app,
     get: (path, headers = {}) => fetch(base + path, { redirect: "manual", headers }),
     json: (path, body) => fetch(base + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
     form: (path, fields, headers = {}) => fetch(base + path, {
@@ -99,7 +100,8 @@ async function addVerifiedPartner(site, admin, company, tier, trade = "Fence") {
 
 test.before(async () => {
   pool = createPool(DATABASE_URL);
-  await pool.query("drop table if exists ratings, messages, request_files, link_events, quotes, requests, partners, settings cascade");
+  await pool.query("drop table if exists invoices, ratings, messages, request_files, link_events, quotes, requests, partners, settings cascade");
+  await pool.query("drop sequence if exists invoice_number_seq");
   await migrate(pool);
   await migrate(pool); // safe to repeat
   secret = await loadSecret(pool);
@@ -923,18 +925,24 @@ test("full flow: request, invites, quotes, choice, and fee", async () => {
   assert.ok((await pool.query("select chosen_at from requests where id = $1", [row.id])).rows[0].chosen_at);
   let fees = await (await site.get("/admin/fees", { cookie: admin.cookie })).text();
   assert.match(fees, /Owed to you now: \$247\.50/);
-  assert.match(fees, /5% of \$4,950 is \$247\.50\. Due by [A-Z][a-z]{2} \d{1,2}, \d{4}\./);
-  await site.form("/admin/fees/" + affordable.id, { csrf: admin.csrf, paid: "on" }, { cookie: admin.cookie });
+  assert.match(fees, /5% of \$4,950 is \$247\.50\. Issued [A-Z][a-z]{2} \d{1,2}, \d{4}\./);
+  // The choice made an invoice for the company that won, and only for that one.
+  const invoices = (await pool.query("select * from invoices where request_id = $1", [row.id])).rows;
+  assert.deepEqual(invoices.map((invoice) => [invoice.quote_id, Number(invoice.amount_cents), invoice.company]), [[affordable.id, 24750, "Budget Fence LLC"]]);
+  assert.ok(fees.includes("INV-" + invoices[0].number + " <span>Fence for Dana Customer</span>"));
+  await site.form("/admin/fees/" + invoices[0].id, { csrf: admin.csrf, paid: "on" }, { cookie: admin.cookie });
   fees = await (await site.get("/admin/fees", { cookie: admin.cookie })).text();
   assert.match(fees, /Owed to you now: \$0\. Collected so far: \$247\.50\./);
 
-  // The owner can undo a choice.
+  // The owner can undo a choice. A fee that was already paid stays in the books as paid.
   await site.form("/admin/requests/" + row.id + "/status", { csrf: admin.csrf, status: "reopen" }, { cookie: admin.cookie });
   assert.equal((await pool.query("select status from requests where id = $1", [row.id])).rows[0].status, "collecting");
+  const stillPaid = (await pool.query("select * from invoices where id = $1", [invoices[0].id])).rows[0];
+  assert.ok(stillPaid.paid_at && stillPaid.current && !stillPaid.voided_at);
 });
 
 test("the dashboard is marked as the owner's, says what needs them, and builds safe send links", async () => {
-  await pool.query("delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
+  await pool.query("delete from invoices; delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
   const site = await start();
   const admin = await login(site);
   const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
@@ -1053,11 +1061,12 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   assert.match(home, /Budget &lt;i&gt;Fence&lt;\/i&gt; was chosen/);
   assert.match(home, /<a href="\/admin\/fees">\$247\.50 in finder’s fees to collect<\/a>/);
   detail = await see("/admin/requests/" + row.id);
-  assert.match(detail, /Send the bill from Fees\./);
+  assert.match(detail, /Send the invoice from Fees\./);
   const fees = await see("/admin/fees");
   assert.match(fees, /class="owner-row fee-row needs-you"/);
   assert.match(fees, /Owed to you/);
-  await site.form("/admin/fees/" + quotes[0].id, { csrf: admin.csrf, paid: "on" }, { cookie: admin.cookie });
+  const owedInvoice = (await pool.query("select id from invoices where quote_id = $1", [quotes[0].id])).rows[0];
+  await site.form("/admin/fees/" + owedInvoice.id, { csrf: admin.csrf, paid: "on" }, { cookie: admin.cookie });
   assert.doesNotMatch(await see("/admin"), /fees to collect/);
 
   // The Links page lists every fixed page with its full address.
@@ -1092,7 +1101,7 @@ function unzip(buffer) {
 }
 
 test("private links carry a readable name, and the dashboard knows when each was sent and opened", async () => {
-  await pool.query("delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
+  await pool.query("delete from invoices; delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
   const site = await start();
   const admin = await login(site);
   const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
@@ -1180,7 +1189,7 @@ test("private links carry a readable name, and the dashboard knows when each was
 });
 
 test("the spreadsheet view and the Excel file list every open request, straight from the site", async () => {
-  await pool.query("delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
+  await pool.query("delete from invoices; delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
   const site = await start();
   const admin = await login(site);
   const see = (path) => site.get(path, { cookie: admin.cookie });
@@ -1777,7 +1786,10 @@ test("a quote line by line: the company record, the side-by-side table, the link
   assert.match(await (await site.get("/admin/requests/" + row.id, cookie)).text(), new RegExp('href="/admin/requests/' + row.id + '/delete">Delete this request</a>'));
   const ask = await (await site.get("/admin/requests/" + row.id + "/delete", cookie)).text();
   assert.match(ask, /<h1[^>]*>Delete this request\?<\/h1>/);
-  assert.ok(ask.includes("2 quotes and the links sent for them") && ask.includes("The customer&rsquo;s rating") && ask.includes("The customer chose Crown &lt;Fence&gt; &amp; Gate") && ask.includes("($490)"));
+  assert.ok(ask.includes("2 quotes and the links sent for them") && ask.includes("The customer&rsquo;s rating"));
+  // The fee's invoice is the one thing that stays, because it is part of the books and says nothing about the customer.
+  const billed = (await pool.query("select * from invoices where request_id = $1", [row.id])).rows[0];
+  assert.ok(ask.includes("<h2>What stays</h2>") && ask.includes("Invoice INV-" + billed.number + " to Crown &lt;Fence&gt; &amp; Gate ($490) stays in your books. It holds nothing about the customer. It is unpaid, so it will be cancelled."));
   assert.equal((await site.get("/admin/requests/" + row.id + "/delete")).status, 303, "signed out: sent to the login page");
   assert.equal((await site.form("/admin/requests/" + row.id + "/delete", { confirm: "yes" }, cookie)).status, 403, "needs the form token");
   assert.equal((await site.form("/admin/requests/" + row.id + "/delete", { csrf: admin.csrf }, cookie)).headers.get("location"), "/admin/requests/" + row.id, "nothing happens without the confirmation");
@@ -1788,6 +1800,14 @@ test("a quote line by line: the company record, the side-by-side table, the link
     assert.equal((await pool.query(`select count(*)::int as n from ${table} where request_id = $1`, [row.id])).rows[0].n, 0, table);
   }
   assert.equal((await pool.query("select count(*)::int as n from requests where id = $1", [row.id])).rows[0].n, 0);
+  const keptInvoice = (await pool.query("select * from invoices where id = $1", [billed.id])).rows[0];
+  assert.deepEqual([keptInvoice.quote_id, keptInvoice.current, keptInvoice.void_reason, keptInvoice.paid_at, keptInvoice.company], [null, false, "The request was deleted", null, "Crown <Fence> & Gate"]);
+  assert.ok(keptInvoice.voided_at);
+  assert.doesNotMatch(JSON.stringify(keptInvoice), /Dana|813-555-0100/);
+  const feesAfter = await (await site.get("/admin/fees", cookie)).text();
+  assert.ok(feesAfter.includes('<p class="owner-row-main">INV-' + billed.number + " <span>Fence</span></p>"), "listed without a link to a request that is gone");
+  assert.ok(feesAfter.includes("<span>No fee. The request was deleted</span>"));
+  assert.match(await (await site.get("/q/invoice/" + billed.token)).text(), /No fee is owed on this invoice\./);
   assert.equal((await site.get(url)).status, 404, "the customer's link stops working");
   assert.equal((await site.get("/admin/requests/" + row.id + "/delete", cookie)).status, 404);
   assert.equal((await pool.query("select count(*)::int as n from partners where id = any($1)", [[budget.id, crown.id]])).rows[0].n, 2, "the companies stay");
@@ -2061,16 +2081,16 @@ test("pages that read without JavaScript: the standard is in its page, and nothi
   assert.deepEqual(shownStandard(await loadStandard(pool)), shown, "the standard is back as it was for the tests that follow");
 });
 
-test("fees: one rule with a floor and a ceiling, a bill for every won job, and settings the owner can change", async () => {
+test("fees: one rule with a floor and a ceiling, an invoice for every won job, and settings the owner can change", async () => {
   const { feeCents, payUrl, checkFee, DEFAULT_FEE } = require("../server/lib/fees");
   const priced = (dollars, terms = DEFAULT_FEE) => feeCents({ amount_cents: dollars * 100, fee_percent: terms.percent, fee_min_cents: terms.minCents, fee_max_cents: terms.maxCents });
   assert.deepEqual([50, 500, 6400, 15000, 70000].map((dollars) => priced(dollars)), [2500, 2500, 32000, 75000, 75000]);
   assert.equal(priced(70000, { percent: 4, minCents: 0, maxCents: 0 }), 280000);
   assert.equal(priced(6400, { percent: 0, minCents: 2500, maxCents: 0 }), 0);
-  // A Stripe link carries the job number. Any other link is left as it is. Nothing but https is kept.
-  assert.equal(payUrl("https://buy.stripe.com/test_abc", "R1003-Q7"), "https://buy.stripe.com/test_abc?client_reference_id=R1003-Q7");
-  assert.equal(payUrl("https://square.link/u/abc", "R1003-Q7"), "https://square.link/u/abc");
-  assert.equal(payUrl("https://notstripe.com.example/x", "R1003-Q7"), "https://notstripe.com.example/x");
+  // A Stripe link carries the invoice number. Any other link is left as it is. Nothing but https is kept.
+  assert.equal(payUrl("https://buy.stripe.com/test_abc", "INV-1003"), "https://buy.stripe.com/test_abc?client_reference_id=INV-1003");
+  assert.equal(payUrl("https://square.link/u/abc", "INV-1003"), "https://square.link/u/abc");
+  assert.equal(payUrl("https://notstripe.com.example/x", "INV-1003"), "https://notstripe.com.example/x");
   for (const link of ["http://buy.stripe.com/x", "javascript:alert(1)", "https://user:pass@example.test/x", "buy.stripe.com/x"]) {
     assert.match(checkFee({ percent: "5", days: "14", pay_link: link }).problem, /https/, link);
   }
@@ -2079,6 +2099,7 @@ test("fees: one rule with a floor and a ceiling, a bill for every won job, and s
   const admin = await login(site);
   const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
   const post = (path, fields) => site.form(path, { csrf: admin.csrf, ...fields }, { cookie: admin.cookie });
+  const DATE = "[A-Z][a-z]{2} \\d{1,2}, \\d{4}";
 
   // The public pages state the rule, and a script keeps it current.
   const rule = "5% of the price you quote, at least $25 and at most $750";
@@ -2103,14 +2124,18 @@ test("fees: one rule with a floor and a ceiling, a bill for every won job, and s
   assert.match(settings, /name="max"[^>]*value="750"/);
   assert.match(settings, /A pool, quoted at \$70,000: <strong>\$750<\/strong>/);
   assert.match(settings, /A cleaning visit, quoted at \$120: <strong>\$25<\/strong>/);
+  // With no Stripe key, the page says so and how to connect it. It never asks for the key itself.
+  assert.match(settings, /<strong>Stripe isn&rsquo;t connected yet\.<\/strong>/);
+  assert.match(settings, /Add a secret named STRIPE_SECRET_KEY/);
+  assert.doesNotMatch(settings, /name="stripe|type="password"/);
 
-  // Earlier tests left jobs of their own on the Fees page, so the sums here are counted from where it stood.
+  // Earlier tests left invoices of their own on the Fees page, so the sums here are counted from where it stood.
   const { formatDollars } = require("../server/lib/validate");
   const totals = async () => {
     const page = await see("/admin/fees");
-    const [, owed, paid] = /Owed to you now: \$([\d,.]+?)\. Collected so far: \$([\d,.]+?)\.</.exec(page);
+    const [, owed, paid] = /Owed to you now: \$([\d,.]+?)\. Collected so far: \$([\d,.]+?)\.[ <]/.exec(page);
     const cents = (text) => Math.round(Number(text.replace(/,/g, "")) * 100);
-    return { owed: cents(owed), paid: cents(paid), bills: (page.match(/class="link-row bill"/g) || []).length };
+    return { owed: cents(owed), paid: cents(paid), bills: (page.match(/class="link-name">Invoice to send</g) || []).length };
   };
   const start0 = await totals();
   const since = async () => {
@@ -2118,38 +2143,74 @@ test("fees: one rule with a floor and a ceiling, a bill for every won job, and s
     return { owed: (now.owed - start0.owed) / 100, paid: (now.paid - start0.paid) / 100, bills: now.bills - start0.bills };
   };
 
-  // One company wins three jobs: a small one, a middle one, and a big one.
+  // One company wins three jobs: a small one, a middle one, and a big one. Each win makes an invoice.
   const company = await addVerifiedPartner(site, admin, "Bill Fence Co", "Affordable");
+  const invoiceOf = async (quoteId) => (await pool.query("select * from invoices where quote_id = $1 and current", [quoteId])).rows[0];
   const win = async (amount) => {
     const { row } = await createRequest(site, { tiers: ["Affordable"] });
     await post("/admin/requests/" + row.id + "/invite", { tier: "Affordable", partner: String(company.id) });
     const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
     const brief = await (await site.get("/q/" + quote.token)).text();
     await site.form("/q/" + quote.token, { action: "submit", amount, timeline: "2 weeks", includes: "All of it" });
+    assert.equal(await invoiceOf(quote.id), undefined, "no invoice until the customer chooses");
     await site.form("/r/" + row.token + "/choose", { quote: String(quote.id) });
-    return { row, quote, brief };
+    return { row, quote, brief, invoice: await invoiceOf(quote.id), ref: "R" + (1000 + row.id) };
   };
   const small = await win("120");
   const middle = await win("6400");
   const big = await win("70000");
   assert.deepEqual([Number(small.quote.fee_percent), small.quote.fee_min_cents, small.quote.fee_max_cents], [5, 2500, 75000]);
   assert.match(small.brief, /the finder&rsquo;s fee is 5% of the price you quote, at least \$25 and at most \$750\./);
-  // Once it wins, the company's own page says what it owes. With no payment link yet, the bill is to come.
+  // Numbers run in order and are never shared. Each invoice keeps its own copy of what it bills, and nothing about the customer.
+  assert.ok(small.invoice.number >= 1001);
+  assert.deepEqual([middle.invoice.number, big.invoice.number], [small.invoice.number + 1, small.invoice.number + 2]);
+  assert.deepEqual([small, middle, big].map((job) => Number(job.invoice.amount_cents)), [2500, 32000, 75000]);
+  assert.deepEqual([middle.invoice.company, middle.invoice.service, middle.invoice.job_ref, Number(middle.invoice.quoted_cents)], ["Bill Fence Co", "Fence", middle.ref, 640000]);
+  assert.equal(Math.round((new Date(middle.invoice.due_at) - new Date(middle.invoice.issued_at)) / 86400000), 14);
+  assert.equal(new Set([small, middle, big].map((job) => job.invoice.token)).size, 3);
+  assert.doesNotMatch(JSON.stringify(middle.invoice), /Dana|Customer|813-555-0100/);
+  const inv = (job) => "INV-" + job.invoice.number;
+  const invoicePath = (job) => "/q/invoice/" + job.invoice.token;
+
+  // Once it wins, the company's own page says what it owes and leads to its invoice.
   let wonPage = await (await site.get("/q/" + small.quote.token)).text();
   assert.match(wonPage, /<h3>Your finder&rsquo;s fee is \$25<\/h3>/);
-  assert.match(wonPage, /5% of \$120 is \$6, raised to the \$25 minimum\. It is due by [A-Z][a-z]{2} \d{1,2}, \d{4}\./);
-  assert.match(wonPage, /We&rsquo;ll send you the bill\./);
-  assert.doesNotMatch(wonPage, /Pay the fee/);
+  assert.match(wonPage, new RegExp("5% of \\$120 is \\$6, raised to the \\$25 minimum\\. Invoice " + inv(small) + " is due by " + DATE + "\\."));
+  assert.ok(wonPage.includes('<a class="primary" href="' + invoicePath(small) + '">See and pay your invoice</a>'));
 
-  // The Fees page: each fee worked out, the total owed, and a nudge to add a payment link.
+  // The invoice page: private, printable, and plain about what is owed and why.
+  const opened = await site.get(invoicePath(small));
+  assert.equal(opened.status, 200);
+  assert.equal(opened.headers.get("cache-control"), "no-store");
+  assert.equal(opened.headers.get("x-robots-tag"), "noindex, nofollow");
+  let paper = await opened.text();
+  assert.match(paper, new RegExp("<title>Invoice " + inv(small) + " \\| AT Legacy Services</title>"));
+  assert.match(paper, new RegExp("<h1>Invoice</h1>\\s*<p class=\"invoice-number\">" + inv(small) + "</p>"));
+  assert.match(paper, new RegExp('<p class="invoice-status">Due by ' + DATE + "\\.</p>"));
+  assert.match(paper, /<dt>Billed to<\/dt><dd>Bill Fence Co<\/dd>/);
+  assert.match(paper, /<dt>From<\/dt><dd>AT Legacy Services<span>AT Legacy Group LLC<br>Land O&rsquo; Lakes, Florida<\/span><\/dd>/);
+  assert.ok(paper.includes("Finder&rsquo;s fee for job " + small.ref + "<span>5% of $120 is $6, raised to the $25 minimum.</span>"));
+  assert.match(paper, /<th scope="row">Total due<\/th><td class="num">\$25\.00<\/td>/);
+  assert.match(paper, /This fee is owed because a customer chose Bill Fence Co for this job through AT Legacy Services\. If the job falls through before any work starts, <a class="plain-link" href="\/contact">tell us<\/a> and no fee is owed\./);
+  assert.match(paper, /<button class="secondary" type="button" data-print>Print or save as a PDF<\/button>/);
+  // With no way to pay online yet, the page says the details are coming. It never shows a dead button.
+  assert.match(paper, /We&rsquo;ll send you the payment details with this invoice\./);
+  assert.doesNotMatch(paper, /class="invoice-pay"|Dana|813-555-0100|Owner preview/);
+  assert.equal((await site.get(invoicePath(small) + "/pay")).headers.get("location"), invoicePath(small));
+  assert.equal((await site.get("/q/invoice/not-a-real-one")).status, 404);
+  assert.equal((await site.get("/q/invoice/not-a-real-one/pay")).status, 404);
+
+  // The Fees page: each fee worked out, the total owed, and a nudge to set up a way to pay online.
   let fees = await see("/admin/fees");
   assert.deepEqual(await since(), { owed: 1095, paid: 0, bills: 3 });
-  assert.match(fees, /5% of \$120 is \$6, raised to the \$25 minimum\. Due by /);
-  assert.match(fees, /5% of \$6,400 is \$320\. Due by /);
-  assert.match(fees, /5% of \$70,000 is \$3,500, held to the \$750 maximum\. Due by /);
-  assert.match(fees, /You haven&rsquo;t added a payment link yet\./);
-  assert.match(fees, /Add your payment link in <a class="plain-link" href="\/admin\/fees\/settings">Fee settings<\/a>/);
-  assert.doesNotMatch(fees, /Pay here:|Open the payment page|name="final"/);
+  assert.match(fees, new RegExp("5% of \\$120 is \\$6, raised to the \\$25 minimum\\. Issued " + DATE + "\\."));
+  assert.match(fees, /5% of \$6,400 is \$320\. Issued /);
+  assert.match(fees, /5% of \$70,000 is \$3,500, held to the \$750 maximum\. Issued /);
+  assert.ok(fees.includes('<a class="owner-row-main" href="/admin/requests/' + middle.row.id + '">' + inv(middle) + " <span>Fence for Dana Customer</span></a>"));
+  assert.match(fees, new RegExp('<strong class="fee-amount">\\$320</strong> <span>Due by ' + DATE + "</span>"));
+  assert.match(fees, /<h2>Waiting to be paid<\/h2>/);
+  assert.match(fees, /Companies can&rsquo;t pay online yet\. <a class="plain-link" href="\/admin\/fees\/settings#stripe">Connect Stripe or add a payment link in Fee settings<\/a>/);
+  assert.doesNotMatch(fees, /name="final"/);
   assert.ok((await see("/admin")).includes('<a href="/admin/fees">' + formatDollars((await totals()).owed) + " in finder’s fees to collect</a>"));
 
   // A bad rule is turned away with the reason, and what was typed stays in the form.
@@ -2167,63 +2228,637 @@ test("fees: one rule with a floor and a ceiling, a bill for every won job, and s
   assert.equal((await site.form("/admin/fees/settings", { percent: "9", days: "14" }, { cookie: admin.cookie })).status, 403);
   assert.equal((await (await site.get("/api/fee")).json()).percent, "5%");
 
-  // With a payment link saved, every bill carries it, tagged with the job number and nothing personal.
+  // With a payment link saved, each invoice has a Pay online button that opens it, tagged with the invoice number.
   const saved = await post("/admin/fees/settings", { percent: "5", min: "25", max: "750", days: "14", pay_link: "https://buy.stripe.com/test_abc" });
   assert.equal(saved.status, 303);
   assert.equal(saved.headers.get("location"), "/admin/fees/settings?saved=1");
   assert.match(await see("/admin/fees/settings?saved=1"), /<strong>Saved\.<\/strong> Briefs you send from now on carry this rule\./);
+  const payLink = "https://buy.stripe.com/test_abc?client_reference_id=" + inv(middle);
+  paper = await (await site.get(invoicePath(middle), { "user-agent": "facebookexternalhit/1.1" })).text();
+  assert.ok(paper.includes('<p class="invoice-pay"><a class="primary" href="' + payLink + '" rel="noopener">Pay online</a></p>'));
+  assert.ok(paper.includes("Enter $320.00 as the amount, and " + inv(middle) + " if the page asks what it is for."));
+  assert.equal((await site.get(invoicePath(middle) + "/pay")).headers.get("location"), payLink);
   fees = await see("/admin/fees");
-  const ref = "R" + (1000 + middle.row.id);
-  const payLink = "https://buy.stripe.com/test_abc?client_reference_id=" + ref + "-Q" + middle.quote.id;
-  const bill = new RegExp('data-copy-text="AT Legacy Services: the finder’s fee for job ' + ref + " \\(Fence\\) is \\$320, due by [A-Z][a-z]{2} \\d{1,2}, \\d{4}\\. Pay here: " + payLink.replace(/[.?]/g, "\\$&") + '"');
-  assert.match(fees, bill);
-  assert.match(fees, new RegExp('<a href="' + payLink.replace(/[.?]/g, "\\$&") + '" target="_blank" rel="noopener">Open the payment page</a>'));
-  assert.match(fees, /<a href="sms:8135550199\?&amp;body=AT%20Legacy%20Services%3A%20the%20finder%E2%80%99s%20fee[^"]*client_reference_id[^"]*">Text it to Pat<\/a>/);
-  assert.match(fees, /<a href="mailto:pat@example\.test\?subject=AT%20Legacy%20Services%20fee[^"]*">Email it to Pat<\/a>/);
-  assert.doesNotMatch(fees, /You haven&rsquo;t added a payment link yet/);
-  // What goes out to the company names the job, never the customer.
-  const sent = fees.match(/data-copy-text="[^"]*"|href="(sms|mailto):[^"]*"|href="https:\/\/buy\.stripe\.com[^"]*"/g);
-  assert.ok(sent.length >= 12);
-  for (const piece of sent) assert.doesNotMatch(decodeURIComponent(piece), /Dana|Customer|813-555-0100|8135550100/);
-  wonPage = await (await site.get("/q/" + middle.quote.token)).text();
-  assert.match(wonPage, new RegExp('<a class="primary" href="' + payLink.replace(/[.?]/g, "\\$&") + '" rel="noopener">Pay the fee</a>'));
+  assert.doesNotMatch(fees, /Companies can&rsquo;t pay online yet/);
 
-  // The big job fell through before work started: no fee. The middle one paid.
-  await post("/admin/fees/" + big.quote.id, { waived: "on" });
-  await post("/admin/fees/" + middle.quote.id, { paid: "on" });
+  // What the owner sends: the words, then the link to the company's invoice page. Copy, text, email, or open it.
+  const link = "https://example.test" + invoicePath(middle);
+  const words = "AT Legacy Services: invoice " + inv(middle) + " for job " + middle.ref + " \\(Fence\\) is \\$320\\.00, due by " + DATE + "\\. See it and pay here:";
+  assert.match(fees, new RegExp('data-copy-text="' + words + " " + link.replace(/\./g, "\\.") + '" data-track-event="copied">Copy it</button>'));
+  assert.match(fees, /<a href="sms:8135550199\?&amp;body=AT%20Legacy%20Services%3A%20invoice%20INV-\d+[^"]*%2Fq%2Finvoice%2F[^"]*" data-track-event="texted">Text it to Pat<\/a>/);
+  assert.match(fees, /<a href="mailto:pat@example\.test\?subject=AT%20Legacy%20Services%3A%20invoice%20INV-\d+%2C%20%24320\.00[^"]*" data-track-event="emailed">Email it to Pat<\/a>/);
+  assert.ok(fees.includes('<a href="' + link + '?owner=1" target="_blank" rel="noopener">Open the invoice</a>'));
+  assert.ok(fees.includes('<div class="link-row bill" data-track-invoice="' + middle.invoice.id + '" data-csrf="' + admin.csrf + '">'));
+  // What goes out to the company names the job, never the customer.
+  const sent = fees.match(/data-copy-text="[^"]*"|href="(sms|mailto):[^"]*"/g);
+  assert.ok(sent.length >= 9);
+  for (const piece of sent) assert.doesNotMatch(decodeURIComponent(piece), /Dana|Customer|813-555-0100|8135550100/);
+
+  // The dashboard knows when the invoice was sent and when the company opened it. The owner's own look and link previews don't count.
+  const mine = (page) => page.slice(page.indexOf('id="invoice-' + middle.invoice.number + '"'), page.indexOf("</li>\n", page.indexOf('id="invoice-' + middle.invoice.number + '"')));
+  assert.match(mine(fees), /<p class="link-activity">Not sent from here yet\. Not opened yet\.<\/p>/);
+  assert.equal((await post("/admin/link-events", { invoice: String(middle.invoice.id), event: "texted" })).status, 204);
+  assert.equal((await post("/admin/link-events", { invoice: String(middle.invoice.id), event: "made-up" })).status, 400);
+  assert.equal((await site.form("/admin/link-events", { invoice: String(middle.invoice.id), event: "texted" }, { cookie: admin.cookie })).status, 403);
+  await site.get(invoicePath(middle) + "?owner=1");
+  assert.match(await (await site.get(invoicePath(middle) + "?owner=1")).text(), /<strong>Owner preview\.<\/strong> This is the company&rsquo;s invoice/);
+  assert.match(mine(await see("/admin/fees")), /<p class="link-activity">Texted [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M\. Not opened yet\.<\/p>/);
+  await site.get(invoicePath(middle));
+  await site.get(invoicePath(middle));
+  assert.match(mine(await see("/admin/fees")), /Opened 1 time, last [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M\.<\/p>/);
+
+  // The big job fell through before work started: no fee. The middle one paid by Zelle.
+  await post("/admin/fees/" + big.invoice.id, { waived: "on" });
+  const marked = await post("/admin/fees/" + middle.invoice.id, { paid: "on", how: "Zelle" });
+  assert.equal(marked.headers.get("location"), "/admin/fees#invoice-" + middle.invoice.number);
   fees = await see("/admin/fees");
   assert.deepEqual(await since(), { owed: 25, paid: 320, bills: 1 });
-  assert.match(fees, /<strong class="fee-amount fee-waived">\$750<\/strong> <span>Waived<\/span>/);
+  assert.match(fees, /<strong class="fee-amount fee-waived">\$750<\/strong> <span>No fee<\/span>/);
+  assert.match(fees, new RegExp('<strong class="fee-amount">\\$320</strong> <span>Paid ' + DATE + " by Zelle</span>"));
+  assert.match(fees, /<h2>Paid<\/h2>/);
+  assert.match(fees, /<h2>No fee<\/h2>/);
   assert.ok((await see("/admin")).includes(formatDollars((await totals()).owed) + " in finder’s fees to collect"));
   assert.match(await see("/admin/requests/" + big.row.id), /You waived the fee on this one\./);
   assert.match(await (await site.get("/q/" + big.quote.token)).text(), /There is no finder&rsquo;s fee on this job\./);
-  assert.match(await (await site.get("/q/" + middle.quote.token)).text(), /Your finder&rsquo;s fee of \$320 is paid\. Thank you\./);
-  // Waived wins over paid, and both can be undone.
-  await post("/admin/fees/" + big.quote.id, { waived: "on", paid: "on" });
-  assert.deepEqual((await pool.query("select fee_paid, fee_waived from quotes where id = $1", [big.quote.id])).rows[0], { fee_paid: false, fee_waived: true });
-  await post("/admin/fees/" + big.quote.id, {});
-  assert.equal((await since()).owed, 775);
-  await post("/admin/fees/" + big.quote.id, { waived: "on" });
+  assert.match(await (await site.get(invoicePath(big))).text(), /<p class="invoice-status is-closed">No fee is owed on this invoice\.<\/p>/);
+  assert.ok((await (await site.get("/q/" + middle.quote.token)).text()).includes('Your finder&rsquo;s fee of $320 is paid. Thank you. <a class="plain-link" href="' + invoicePath(middle) + '">See your receipt</a>'));
+  // A paid invoice's page is the receipt, and the owner has the words to send it.
+  paper = await (await site.get(invoicePath(middle))).text();
+  assert.match(paper, new RegExp("<title>Receipt " + inv(middle)));
+  assert.match(paper, new RegExp('<h1>Receipt</h1>[\\s\\S]*<p class="invoice-status is-paid">Paid ' + DATE + "\\. Thank you\\.</p>"));
+  assert.match(paper, new RegExp("<dt>Paid</dt><dd>" + DATE + ", by Zelle</dd>"));
+  assert.match(paper, /<th scope="row">Total paid<\/th><td class="num">\$320\.00<\/td>/);
+  assert.doesNotMatch(paper, /class="invoice-pay"|Pay online|This fee is owed/);
+  assert.match(paper, /If that job falls through before any work starts, <a class="plain-link" href="\/contact">tell us<\/a> and the fee is returned\./);
+  // On the Fees page a settled invoice folds its receipt and switches away.
+  assert.match(mine(fees), /<details class="fee-more">\s*<summary><span>Send the receipt, or change this<\/span><\/summary>/);
+  assert.doesNotMatch(mine(fees), /class="link-activity"/);
+  assert.match(mine(fees), new RegExp('<p class="link-name">Receipt to send</p>\\s*<p class="bill-text">AT Legacy Services: we received \\$320\\.00 for invoice ' + inv(middle) + "\\. Thank you\\. Your receipt:"));
+  assert.ok(mine(fees).includes(">Open the receipt</a>"));
+  assert.equal((await site.get(invoicePath(middle) + "/pay")).headers.get("location"), invoicePath(middle), "nothing to pay on a paid invoice");
 
-  // The Excel file carries the fee as billed and says which were waived.
+  // On an unpaid invoice, "no fee" wins over "paid". Both switches can be undone.
+  const flags = async (job) => (await pool.query("select fee_paid, fee_waived from quotes where id = $1", [job.quote.id])).rows[0];
+  await post("/admin/fees/" + big.invoice.id, { waived: "on", paid: "on" });
+  assert.deepEqual(await flags(big), { fee_paid: false, fee_waived: true });
+  assert.equal((await invoiceOf(big.quote.id)).paid_at, null);
+  await post("/admin/fees/" + big.invoice.id, {});
+  assert.equal((await since()).owed, 775);
+  await post("/admin/fees/" + big.invoice.id, { waived: "on" });
+  // On a paid invoice, "no fee" records a refund. Unticking it puts the payment back.
+  await post("/admin/fees/" + middle.invoice.id, { paid: "on", waived: "on" });
+  assert.deepEqual(await flags(middle), { fee_paid: false, fee_waived: true });
+  assert.deepEqual(await since(), { owed: 25, paid: 0, bills: 1 });
+  assert.match(mine(await see("/admin/fees")), new RegExp('<strong class="fee-amount fee-waived">\\$320</strong> <span>Refunded ' + DATE + "</span>"));
+  assert.match(await (await site.get(invoicePath(middle))).text(), new RegExp('<p class="invoice-status is-closed">Refunded ' + DATE + "\\. Nothing is owed\\.</p>"));
+  await post("/admin/fees/" + middle.invoice.id, { paid: "on" });
+  assert.deepEqual(await flags(middle), { fee_paid: true, fee_waived: false });
+  // Marked paid by mistake: unticking it makes the invoice owed again.
+  await post("/admin/fees/" + middle.invoice.id, {});
+  assert.deepEqual([await flags(middle), (await since()).owed], [{ fee_paid: false, fee_waived: false }, 345]);
+  await post("/admin/fees/" + middle.invoice.id, { paid: "on", how: "Check" });
+  assert.deepEqual([(await invoiceOf(middle.quote.id)).paid_how, (await invoiceOf(middle.quote.id)).processor_fee_cents], ["Check", 0]);
+  // An invoice that isn't there changes nothing.
+  assert.equal((await post("/admin/fees/999999", { paid: "on" })).headers.get("location"), "/admin/fees");
+
+  // The requests file carries the fee as billed and says which were waived.
   const workbook = unzip(Buffer.from(await (await site.get("/admin/tracker.xlsx", { cookie: admin.cookie })).arrayBuffer()));
   const everything = Object.values(workbook).join("\n");
   assert.match(everything, /Waived/);
 
-  // A new rule reaches new briefs only. Jobs already sent keep the terms they were sent with.
+  // A new rule reaches new briefs only. Jobs already sent keep their terms, and invoices already issued keep their due day.
   await post("/admin/fees/settings", { percent: "4", min: "", max: "", days: "7", pay_link: "" });
   assert.deepEqual(await (await site.get("/api/fee")).json(), { percent: "4%", rule: "4% of the price you quote", limits: "", days: 7 });
   const later = await win("70000");
   assert.deepEqual([Number(later.quote.fee_percent), later.quote.fee_min_cents, later.quote.fee_max_cents], [4, 0, 0]);
   assert.match(later.brief, /the finder&rsquo;s fee is 4% of the price you quote\. You never pay/);
+  assert.equal(Math.round((new Date(later.invoice.due_at) - new Date(later.invoice.issued_at)) / 86400000), 7);
+  const kept = await invoiceOf(small.quote.id);
+  assert.equal(Math.round((new Date(kept.due_at) - new Date(kept.issued_at)) / 86400000), 14);
   fees = await see("/admin/fees");
-  assert.match(fees, /4% of \$70,000 is \$2,800\. Due by /);
+  assert.match(fees, /4% of \$70,000 is \$2,800\. Issued /);
   assert.match(fees, /5% of \$120 is \$6, raised to the \$25 minimum/);
   assert.deepEqual(await since(), { owed: 2825, paid: 320, bills: 2 });
   assert.match(fees, /Your fee is 4% of the quoted price, owed only when a customer chooses the company\./);
 
   // Put the rule back for the tests that follow.
   await pool.query("delete from settings where key = 'fee'");
+});
+
+// The cells of one sheet of an Excel file, by address: { A2: "Invoices billed", B2: "1320" }
+function cellsOf(xml) {
+  const cells = {};
+  for (const [, at, text, number] of xml.matchAll(/<c r="([A-Z]+\d+)"[^>]*>(?:<is><t[^>]*>([^<]*)<\/t><\/is>|<v>([^<]*)<\/v>)<\/c>/g)) {
+    cells[at] = text !== undefined ? text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"') : number;
+  }
+  return cells;
+}
+
+test("invoices: an overdue one gets a reminder, an undone choice cancels its invoice, and the books add up", async () => {
+  await pool.query("delete from invoices; delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'");
+  const site = await start();
+  const admin = await login(site);
+  const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
+  const post = (path, fields) => site.form(path, { csrf: admin.csrf, ...fields }, { cookie: admin.cookie });
+  const DATE = "[A-Z][a-z]{2} \\d{1,2}, \\d{4}";
+  const company = await addVerifiedPartner(site, admin, "Ledger Fence Co", "Mid-range");
+  const invoiceOf = async (quoteId) => (await pool.query("select * from invoices where quote_id = $1 and current", [quoteId])).rows[0];
+  const win = async (amount) => {
+    const { row } = await createRequest(site, { tiers: ["Mid-range"] });
+    await post("/admin/requests/" + row.id + "/invite", { tier: "Mid-range", partner: String(company.id) });
+    const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
+    await site.form("/q/" + quote.token, { action: "submit", amount, timeline: "2 weeks", includes: "All of it" });
+    await site.form("/r/" + row.token + "/choose", { quote: String(quote.id) });
+    return { row, quote, invoice: await invoiceOf(quote.id), ref: "R" + (1000 + row.id) };
+  };
+  const first = await win("6400");
+  const second = await win("9000");
+  const third = await win("2000");
+  const inv = (job) => "INV-" + job.invoice.number;
+  const part = (page, id) => {
+    const from = page.indexOf('<section class="app-section fee-part" id="' + id + '">');
+    return from < 0 ? "" : page.slice(from, page.indexOf("</section>", from));
+  };
+
+  // Nothing is late yet: no Overdue section, and nothing about it under "Needs you".
+  let fees = await see("/admin/fees");
+  assert.equal(part(fees, "overdue"), "");
+  assert.ok(part(fees, "waiting").includes(inv(first)) && part(fees, "waiting").includes(inv(third)));
+  assert.match(fees, /Owed to you now: \$870\. Collected so far: \$0\.</);
+  assert.doesNotMatch(await see("/admin"), /overdue/);
+
+  // An invoice is overdue from the day after its due day. It moves up, and the bill becomes a reminder.
+  await pool.query("update invoices set issued_at = now() - interval '17 days', due_at = now() - interval '3 days' where id = $1", [first.invoice.id]);
+  fees = await see("/admin/fees");
+  assert.match(fees, /Owed to you now: \$870\. Collected so far: \$0\. Overdue: \$320\.</);
+  const lateRow = part(fees, "overdue");
+  assert.match(lateRow, /<h2>Overdue<\/h2>\s*<p class="form-note">Past their due day\. Each has a reminder ready to send\.<\/p>/);
+  assert.ok(lateRow.includes(inv(first)) && !lateRow.includes(inv(second)));
+  assert.match(lateRow, /<strong class="fee-amount">\$320<\/strong> <span>Overdue by 3 days<\/span>/);
+  assert.match(lateRow, new RegExp('<p class="link-name">Reminder to send</p>\\s*<p class="bill-text">AT Legacy Services: a reminder that invoice ' + inv(first) + " for job " + first.ref + " \\(Fence\\), \\$320\\.00, was due " + DATE + "\\. See it and pay here:"));
+  assert.match(lateRow, /mailto:pat@example\.test\?subject=AT%20Legacy%20Services%3A%20reminder%3A%20invoice%20INV-/);
+  assert.ok(fees.indexOf('id="overdue"') < fees.indexOf('id="waiting"'), "what needs the owner comes first");
+  assert.ok((await see("/admin")).includes('<a href="/admin/fees#overdue">1 invoice is overdue</a>'));
+  assert.match(await (await site.get("/q/invoice/" + first.invoice.token)).text(), new RegExp('<p class="invoice-status is-late">Overdue\\. It was due ' + DATE + "\\.</p>"));
+  assert.match(await (await site.get("/q/" + first.quote.token)).text(), new RegExp("Invoice " + inv(first) + " is overdue\\. It was due " + DATE + "\\."));
+  // Due today is not late.
+  await pool.query("update invoices set due_at = now() where id = $1", [third.invoice.id]);
+  assert.ok((await see("/admin")).includes("1 invoice is overdue"));
+  await pool.query("update invoices set due_at = now() - interval '1 day' where id = $1", [third.invoice.id]);
+  assert.ok((await see("/admin")).includes("2 invoices are overdue"));
+  assert.match(part(await see("/admin/fees"), "overdue"), /Overdue by 1 day</);
+  await pool.query("update invoices set due_at = issued_at + interval '14 days' where id = $1", [third.invoice.id]);
+
+  // The owner undoes the customer's choice on an unpaid job: its invoice is cancelled for good, and stays listed.
+  await post("/admin/requests/" + second.row.id + "/status", { status: "reopen" });
+  const undone = (await pool.query("select * from invoices where id = $1", [second.invoice.id])).rows[0];
+  assert.deepEqual([undone.current, undone.void_reason, undone.paid_at, undone.quote_id], [false, "The customer’s choice was undone", null, second.quote.id]);
+  assert.ok(undone.voided_at);
+  fees = await see("/admin/fees");
+  const gone = part(fees, "no-fee");
+  assert.ok(gone.includes(inv(second)) && gone.includes("<span>No fee. The customer’s choice was undone</span>"));
+  assert.ok(!fees.includes('action="/admin/fees/' + second.invoice.id + '"'), "a cancelled invoice has no switches");
+  await post("/admin/fees/" + second.invoice.id, { paid: "on" });
+  assert.equal((await pool.query("select paid_at from invoices where id = $1", [second.invoice.id])).rows[0].paid_at, null, "and can't be reopened");
+  assert.match(await (await site.get("/q/invoice/" + second.invoice.token)).text(), /No fee is owed on this invoice\./);
+  assert.match(fees, /Owed to you now: \$420\./);
+  // The customer chooses the same company again: a new invoice with the next number. The cancelled one keeps its own.
+  await site.form("/r/" + second.row.token + "/choose", { quote: String(second.quote.id) });
+  const again = await invoiceOf(second.quote.id);
+  assert.ok(again.id !== second.invoice.id && again.number > third.invoice.number && !again.voided_at);
+  assert.equal(Number(again.amount_cents), 45000);
+  assert.ok((await (await site.get("/q/" + second.quote.token)).text()).includes("Invoice INV-" + again.number + " is due by "));
+  assert.equal((await pool.query("select count(*)::int as n from invoices where quote_id = $1", [second.quote.id])).rows[0].n, 2);
+
+  // The books. One fee paid by check, one through the payment link and then refunded.
+  assert.equal((await site.get("/admin/fees/books")).status, 303);
+  assert.equal((await site.get("/admin/fees/books.xlsx")).status, 303);
+  await post("/admin/fees/" + first.invoice.id, { paid: "on", how: "Check" });
+  await post("/admin/fees/" + third.invoice.id, { paid: "on", how: "Payment link" });
+  await post("/admin/fees/" + third.invoice.id, { paid: "on", waived: "on" });
+  const books = await see("/admin/fees/books");
+  assert.match(books, /<h1>Books<\/h1>\s*<p class="owner-intro">Owed to you today: \$450\.<\/p>/);
+  const today = new Date();
+  const month = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit" }).format(today).slice(0, 7);
+  const monthName = today.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "America/New_York" });
+  assert.ok(books.includes('<a class="secondary" href="/admin/fees/books.xlsx?period=' + month + '" aria-label="Download ' + monthName + ' for Excel">Download for Excel</a>'));
+  assert.ok(books.includes('<a class="secondary" href="/admin/fees/books.xlsx?period=' + month.slice(0, 4) + '">Download all of ' + month.slice(0, 4) + "</a>"));
+  assert.ok(books.includes('<a class="secondary" href="/admin/fees/books.xlsx">Download everything</a>'));
+  assert.match(books, /<span>reached you<\/span>/);
+  assert.ok((await see("/admin/fees")).includes('<a class="secondary" href="/admin/fees/books">Books and month-end files</a>'));
+
+  const download = await site.get("/admin/fees/books.xlsx", { cookie: admin.cookie });
+  assert.equal(download.headers.get("content-type"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  assert.match(download.headers.get("content-disposition"), /^attachment; filename="AT-Legacy-books-all-\d{4}-\d\d-\d\d\.xlsx"$/);
+  const file = unzip(Buffer.from(await download.arrayBuffer()));
+  assert.deepEqual([...file["xl/workbook.xml"].matchAll(/<sheet name="([^"]+)"/g)].map((m) => m[1]), ["Summary", "Money in", "Invoices"]);
+  const summary = cellsOf(file["xl/worksheets/sheet1.xml"]);
+  // Billed: 320 + 450 + 100, and 450 again for the invoice issued after the undo. All in dollars.
+  assert.deepEqual(
+    [2, 3, 4, 5, 6, 7, 8, 9, 10].map((row) => [summary["A" + row], summary["B" + row]]),
+    [["Period", undefined], ["Invoices billed", "1320"], ["Of those, no fee owed", "450"], ["Payments received", "420"], ["Refunds", "-100"],
+      ["Kept by the payment service", "0"], ["Reached you", "320"], ["Still owed to you today", "450"], ["Of that, overdue", "0"]]
+  );
+  assert.equal(summary.C2, "All time");
+  assert.equal(summary.C7, "1 payment doesn’t have a processing fee on file, so this may be low");
+  const money = cellsOf(file["xl/worksheets/sheet2.xml"]);
+  // Invoice, what, paid by, amount, what the service kept, what reached the owner.
+  const moneyRow = (row) => ["B", "C", "G", "H", "I", "J"].map((column) => money[column + row]);
+  assert.deepEqual([moneyRow(2), moneyRow(3), moneyRow(4)], [
+    [inv(first), "Payment", "Check", "320", "0", "320"],
+    [inv(third), "Payment", "Payment link", "100", undefined, undefined],
+    [inv(third), "Refund", undefined, "-100", "0", "-100"]
+  ]);
+  assert.equal(money.D2, "Ledger Fence Co");
+  const list = cellsOf(file["xl/worksheets/sheet3.xml"]);
+  const listRow = (row) => ["A", "J", "K", "Q"].map((column) => list[column + row]);
+  assert.deepEqual([listRow(2), listRow(3), listRow(4), listRow(5)], [
+    [inv(first), "320", "Paid", undefined],
+    [inv(second), "450", "No fee", "The customer’s choice was undone"],
+    [inv(third), "100", "Refunded", undefined],
+    ["INV-" + again.number, "450", "Open", undefined]
+  ]);
+  // Text is always written as text, never as a formula, and the file never holds the customer.
+  assert.doesNotMatch(Object.values(file).join("\n"), /<f>|Dana|813-555-0100/);
+  // A month's file is named for the month. Anything else asked for is treated as everything.
+  const monthly = await site.get("/admin/fees/books.xlsx?period=" + month, { cookie: admin.cookie });
+  assert.equal(monthly.headers.get("content-disposition"), 'attachment; filename="AT-Legacy-books-' + month + '.xlsx"');
+  assert.equal(cellsOf(unzip(Buffer.from(await monthly.arrayBuffer()))["xl/worksheets/sheet1.xml"]).C2, monthName);
+  assert.match((await site.get("/admin/fees/books.xlsx?period=../../etc", { cookie: admin.cookie })).headers.get("content-disposition"), /books-all-/);
+  const empty = cellsOf(unzip(Buffer.from(await (await site.get("/admin/fees/books.xlsx?period=1999-01", { cookie: admin.cookie })).arrayBuffer()))["xl/worksheets/sheet1.xml"]);
+  assert.deepEqual([empty.B3, empty.B5, empty.B9], ["0", "0", "450"], "an empty month still says what is owed today");
+
+  // A job won before invoices existed gets its invoice the first time the owner looks, in the state the job was in.
+  await pool.query("delete from invoices where quote_id = any($1)", [[first.quote.id, third.quote.id]]);
+  await pool.query("update quotes set fee_paid = false, fee_waived = true where id = $1", [third.quote.id]);
+  await see("/admin");
+  const [wasPaid, wasWaived] = [await invoiceOf(first.quote.id), await invoiceOf(third.quote.id)];
+  assert.ok(wasPaid.paid_at && !wasPaid.voided_at && wasPaid.number > again.number);
+  assert.ok(wasWaived.voided_at && !wasWaived.paid_at && wasWaived.void_reason === "No fee on this job");
+  assert.deepEqual([Number(wasPaid.amount_cents), Number(wasWaived.amount_cents)], [32000, 10000]);
+  await see("/admin/fees");
+  assert.equal((await pool.query("select count(*)::int as n from invoices where current and quote_id = any($1)", [[first.quote.id, third.quote.id]])).rows[0].n, 2, "and only once");
+});
+
+// A stand-in for Stripe's API: enough of it to make a payment page and see how it ended.
+function fakeStripe(key) {
+  const stripe = { sessions: new Map(), intents: new Map(), charges: new Map(), entries: new Map(), deny: new Set(), created: [], calls: [], down: false };
+  const answer = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const refuse = (permission) => answer(403, { error: { type: "invalid_request_error", message:
+    "The provided key '" + key.slice(0, 8) + "********' does not have the required permissions for this endpoint on account 'acct_test'. Having the 'rak_" + permission + "' permission would allow this request to continue." } });
+  const missing = (what) => answer(404, { error: { type: "invalid_request_error", message: "No such " + what } });
+  stripe.fetch = async (url, options = {}) => {
+    const address = new URL(url);
+    if (address.hostname !== "api.stripe.com") throw new Error("no network in tests");
+    if (stripe.down) throw new Error("connect ECONNREFUSED");
+    const method = options.method || "GET";
+    const path = address.pathname;
+    const sent = (options.headers || {}).authorization || "";
+    stripe.calls.push(method + " " + path);
+    if (sent !== "Bearer " + key) return answer(401, { error: { type: "invalid_request_error", message: "Invalid API Key provided: " + sent.slice(7, 15) + "****************" } });
+    const denied = (permission) => stripe.deny.has(permission);
+    if (method === "GET" && path === "/v1/checkout/sessions") return denied("checkout_session_read") ? refuse("checkout_session_read") : answer(200, { object: "list", data: [] });
+    if (method === "GET" && path === "/v1/charges") return denied("charge_read") ? refuse("charge_read") : answer(200, { object: "list", data: [] });
+    if (method === "GET" && path === "/v1/balance_transactions") return denied("balance_read") ? refuse("balance_read") : answer(200, { object: "list", data: [] });
+    if (method === "POST" && path === "/v1/checkout/sessions") {
+      if (denied("checkout_session_write")) return refuse("checkout_session_write");
+      const fields = Object.fromEntries(new URLSearchParams(options.body));
+      const id = "cs_test_" + (stripe.created.length + 1);
+      const session = {
+        id, object: "checkout.session", url: "https://checkout.stripe.com/c/pay/" + id, status: "open", payment_status: "unpaid",
+        currency: fields["line_items[0][price_data][currency]"], amount_total: Number(fields["line_items[0][price_data][unit_amount]"]),
+        payment_intent: null, expires_at: Math.floor(Date.now() / 1000) + 86400, client_reference_id: fields.client_reference_id
+      };
+      stripe.sessions.set(id, session);
+      stripe.created.push({ id, fields, contentType: options.headers["content-type"] });
+      return answer(200, session);
+    }
+    let found = /^\/v1\/checkout\/sessions\/([\w-]+)\/expire$/.exec(path);
+    if (found && method === "POST") {
+      const session = stripe.sessions.get(found[1]);
+      if (denied("checkout_session_write")) return refuse("checkout_session_write");
+      if (!session) return missing("checkout.session: " + found[1]);
+      if (session.status !== "open") return answer(400, { error: { type: "invalid_request_error", message: "Only Checkout Sessions with a status in [\"open\"] can be expired. This Checkout Session has a status of " + session.status + "." } });
+      session.status = "expired";
+      return answer(200, session);
+    }
+    found = /^\/v1\/checkout\/sessions\/([\w-]+)$/.exec(path);
+    if (found) return stripe.sessions.has(found[1]) ? answer(200, stripe.sessions.get(found[1])) : missing("checkout.session: " + found[1]);
+    found = /^\/v1\/payment_intents\/([\w-]+)$/.exec(path);
+    if (found) return stripe.intents.has(found[1]) ? answer(200, stripe.intents.get(found[1])) : missing("payment_intent: " + found[1]);
+    found = /^\/v1\/charges\/([\w-]+)$/.exec(path);
+    if (found) return denied("charge_read") ? refuse("charge_read") : stripe.charges.has(found[1]) ? answer(200, stripe.charges.get(found[1])) : missing("charge: " + found[1]);
+    found = /^\/v1\/balance_transactions\/([\w-]+)$/.exec(path);
+    if (found) return denied("balance_read") ? refuse("balance_read") : stripe.entries.has(found[1]) ? answer(200, stripe.entries.get(found[1])) : missing("balance transaction: " + found[1]);
+    return answer(404, { error: { type: "invalid_request_error", message: "Unrecognized request URL (" + method + ": " + path + ")." } });
+  };
+  // What a company does on Stripe's page. `fee` is what Stripe keeps, in cents, or null when Stripe hasn't worked it out yet.
+  const settle = (id, type, paid, fee) => {
+    const n = id.split("_").pop();
+    const session = stripe.sessions.get(id);
+    session.status = "complete";
+    session.payment_status = paid ? "paid" : "unpaid";
+    session.payment_intent = "pi_" + n;
+    stripe.intents.set("pi_" + n, { id: "pi_" + n, object: "payment_intent", status: paid ? "succeeded" : "processing", latest_charge: "ch_" + n });
+    stripe.charges.set("ch_" + n, { id: "ch_" + n, object: "charge", payment_method_details: { type }, balance_transaction: fee === null ? null : "txn_" + n, amount_refunded: 0, refunded: false });
+    if (fee !== null) stripe.entries.set("txn_" + n, { id: "txn_" + n, object: "balance_transaction", fee, net: session.amount_total - fee });
+  };
+  stripe.pay = (id, { type = "card", fee = null } = {}) => settle(id, type, true, fee);
+  stripe.payByBank = (id) => settle(id, "us_bank_account", false, null);
+  stripe.bankArrives = (id, fee) => settle(id, "us_bank_account", true, fee);
+  stripe.bankFails = (id) => { stripe.intents.get("pi_" + id.split("_").pop()).status = "requires_payment_method"; };
+  return stripe;
+}
+
+test("Stripe: a company pays its invoice's exact amount, and the invoice marks itself paid", async () => {
+  await pool.query("delete from invoices; delete from quotes; delete from requests; delete from partners where company <> 'AT Legacy Services'; delete from settings where key in ('stripe_status', 'fee')");
+  const { createPayments, formFields, tidy } = require("../server/lib/payments");
+  // Built from pieces so it never reads as a real key to a scanner. No real key is ever in this repository.
+  const key = ["rk", "test", "A1b2C3d4E5f6G7h8J9k0"].join("_");
+  const stripe = fakeStripe(key);
+  const site = await start({ STRIPE_SECRET_KEY: " " + key + "\n" }, stripe.fetch);
+  const payments = site.app.locals.payments;
+  const admin = await login(site);
+  const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
+  const post = (path, fields) => site.form(path, { csrf: admin.csrf, ...fields }, { cookie: admin.cookie });
+  const DATE = "[A-Z][a-z]{2} \\d{1,2}, \\d{4}";
+  const company = await addVerifiedPartner(site, admin, "Stripe Fence Co", "Premium");
+  const invoiceOf = async (quoteId) => (await pool.query("select * from invoices where quote_id = $1 and current", [quoteId])).rows[0];
+  const win = async (amount) => {
+    const { row } = await createRequest(site, { tiers: ["Premium"] });
+    await post("/admin/requests/" + row.id + "/invite", { tier: "Premium", partner: String(company.id) });
+    const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
+    await site.form("/q/" + quote.token, { action: "submit", amount, timeline: "2 weeks", includes: "All of it" });
+    await site.form("/r/" + row.token + "/choose", { quote: String(quote.id) });
+    const invoice = await invoiceOf(quote.id);
+    return { row, quote, invoice, page: "/q/invoice/" + invoice.token, ref: "INV-" + invoice.number };
+  };
+  const now = async (job) => (await pool.query("select * from invoices where id = $1", [job.invoice.id])).rows[0];
+  const pay = async (job) => (await site.get(job.page + "/pay")).headers.get("location");
+  const row = (page, job) => page.slice(page.indexOf('id="invoice-' + job.invoice.number + '"'), page.indexOf("</li>\n", page.indexOf('id="invoice-' + job.invoice.number + '"')));
+
+  // How Stripe's form fields are written, and that nothing shaped like a key survives in a message.
+  assert.equal(formFields({ a: 1, list: [{ deep: { x: "y z" } }], skip: null }).toString(), "a=1&list%5B0%5D%5Bdeep%5D%5Bx%5D=y+z");
+  assert.equal(tidy("Invalid API Key provided: " + key), "Invalid API Key provided: your key");
+
+  // Until Stripe has accepted the key, no page offers to pay through it.
+  const first = await win("6400");
+  assert.equal(payments.ready(), false);
+  assert.match(await (await site.get(first.page)).text(), /We&rsquo;ll send you the payment details with this invoice\./);
+  let status = await payments.check();
+  assert.deepEqual([status.on, status.ok, status.mode, status.kind, status.sessions, status.charges, status.balance, status.problem], [true, true, "test", "restricted", "ok", "ok", "ok", ""]);
+  assert.equal(payments.ready(), true);
+  assert.ok(stripe.created.length === 0 && !stripe.calls.some((call) => call.startsWith("POST")), "trying the key makes nothing");
+  let settings = await see("/admin/fees/settings");
+  assert.match(settings, /<strong>Stripe is connected in test mode\.<\/strong> A company pays the exact amount from its invoice/);
+  assert.match(settings, /This is a test key, so no real money moves\./);
+  assert.match(settings, /<li>Payment pages for the exact amount: ready<\/li>\s*<li>Card or bank on each payment, and refunds you make in Stripe: ready<\/li>\s*<li>What Stripe kept, for your books: ready<\/li>/);
+  assert.match(settings, /Not needed while Stripe is connected: each invoice has its own Pay button\./);
+  // The key is never written where a page or the database could show it.
+  const stored = (await pool.query("select value from settings where key = 'stripe_status'")).rows[0].value;
+  assert.ok(!stored.includes("A1b2C3") && !settings.includes("A1b2C3") && !stored.includes("rk_test"));
+  assert.doesNotMatch(await see("/admin/fees"), /Companies can&rsquo;t pay online yet/);
+
+  // The invoice now has a Pay button for its exact amount. It leads to a page Stripe makes for this invoice alone.
+  let paper = await (await site.get(first.page)).text();
+  assert.ok(paper.includes('<p class="invoice-pay"><a class="primary" href="' + first.page + '/pay" rel="nofollow">Pay $320.00</a></p>'));
+  assert.match(paper, /You pay on Stripe&rsquo;s secure page\. We never see your card or bank details\./);
+  const go = await site.get(first.page + "/pay");
+  assert.deepEqual([go.status, go.headers.get("location")], [303, "https://checkout.stripe.com/c/pay/cs_test_1"]);
+  const made = stripe.created[0];
+  assert.equal(made.contentType, "application/x-www-form-urlencoded");
+  assert.deepEqual(made.fields, {
+    mode: "payment",
+    client_reference_id: first.ref,
+    success_url: "https://example.test" + first.page,
+    cancel_url: "https://example.test" + first.page,
+    "line_items[0][quantity]": "1",
+    "line_items[0][price_data][currency]": "usd",
+    "line_items[0][price_data][unit_amount]": "32000",
+    "line_items[0][price_data][product_data][name]": "Finder’s fee, invoice " + first.ref,
+    "line_items[0][price_data][product_data][description]": "Job R" + (1000 + first.row.id) + ", Fence",
+    "metadata[invoice]": first.ref,
+    "payment_intent_data[description]": "AT Legacy Services invoice " + first.ref,
+    "payment_intent_data[metadata][invoice]": first.ref
+  }, "the invoice and its amount, and nothing about the customer or the company's people");
+  // Asking again reuses the same page, and a page that isn't paid yet changes nothing.
+  assert.equal(await pay(first), "https://checkout.stripe.com/c/pay/cs_test_1");
+  assert.equal(stripe.created.length, 1);
+  await payments.syncAll();
+  assert.equal((await now(first)).paid_at, null);
+
+  // The company pays by card and comes back. The page it lands on is already the receipt.
+  stripe.pay("cs_test_1", { type: "card", fee: 958 });
+  paper = await (await site.get(first.page)).text();
+  assert.match(paper, new RegExp('<h1>Receipt</h1>[\\s\\S]*<p class="invoice-status is-paid">Paid ' + DATE + "\\. Thank you\\.</p>"));
+  assert.match(paper, new RegExp("<dt>Paid</dt><dd>" + DATE + ", by card</dd>"));
+  let paid = await now(first);
+  assert.deepEqual([paid.paid_how, paid.processor_fee_cents, paid.stripe_payment_intent, paid.stripe_charge, paid.pending_since], ["Card through Stripe", 958, "pi_1", "ch_1", null]);
+  assert.deepEqual((await pool.query("select fee_paid, fee_waived from quotes where id = $1", [first.quote.id])).rows[0], { fee_paid: true, fee_waived: false });
+  let fees = await see("/admin/fees");
+  assert.match(row(fees, first), new RegExp('<strong class="fee-amount">\\$320</strong> <span>Paid ' + DATE + " by card through Stripe\\. Stripe kept \\$9\\.58</span>"));
+  // A payment Stripe reported can't be unticked by hand. It can be refunded.
+  assert.ok(row(fees, first).includes('<input type="hidden" name="paid" value="on">') && !row(fees, first).includes('type="checkbox" name="paid"'));
+  assert.ok(row(fees, first).includes("<span>I refunded it. No fee on this job</span>"));
+  await post("/admin/fees/" + first.invoice.id, {});
+  assert.ok((await now(first)).paid_at, "still paid");
+  assert.match(fees, /Owed to you now: \$0\. Collected so far: \$320\.</);
+  assert.doesNotMatch(await see("/admin"), /fees to collect/);
+  assert.match(await see("/admin/fees/settings"), /Last payment reported by Stripe: [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M\./);
+  assert.equal(await pay(first), first.page, "nothing to pay twice");
+  assert.equal(stripe.created.length, 1);
+
+  // A bank payment takes days. The invoice says it is on its way, offers nothing more to pay, and marks itself paid when it lands.
+  const bank = await win("9000");
+  assert.equal(await pay(bank), "https://checkout.stripe.com/c/pay/cs_test_2");
+  stripe.payByBank("cs_test_2");
+  await payments.syncAll();
+  let waiting = await now(bank);
+  assert.ok(waiting.pending_since && !waiting.paid_at);
+  fees = await see("/admin/fees");
+  assert.match(row(fees, bank), new RegExp("<span>Bank payment on its way since " + DATE + "</span>"));
+  assert.ok(!row(fees, bank).includes("needs-you") && row(fees, bank).includes("this invoice marks itself paid when the money arrives"));
+  paper = await (await site.get(bank.page)).text();
+  assert.match(paper, new RegExp("A bank payment was started on " + DATE + "\\. Bank payments take a few business days\\."));
+  assert.doesNotMatch(paper, /class="invoice-pay"/);
+  assert.equal(await pay(bank), bank.page);
+  assert.equal(stripe.created.length, 2);
+  stripe.bankArrives("cs_test_2", 360);
+  await payments.syncAll();
+  waiting = await now(bank);
+  assert.deepEqual([Boolean(waiting.paid_at), waiting.paid_how, waiting.processor_fee_cents, waiting.pending_since], [true, "Bank through Stripe", 360, null]);
+
+  // A bank payment that fails puts the invoice back to unpaid, says so, and the company can pay again.
+  const bounced = await win("2000");
+  assert.equal(await pay(bounced), "https://checkout.stripe.com/c/pay/cs_test_3");
+  stripe.payByBank("cs_test_3");
+  await payments.syncAll();
+  assert.ok((await now(bounced)).pending_since);
+  stripe.bankFails("cs_test_3");
+  await payments.syncAll();
+  let back = await now(bounced);
+  assert.deepEqual([back.pending_since, back.stripe_session_id, back.payment_note, back.paid_at], [null, "", "A bank payment was started and did not go through.", null]);
+  paper = await (await site.get(bounced.page)).text();
+  assert.ok(paper.includes('<p class="invoice-note">A bank payment was started and did not go through. You can pay again below.</p>') && paper.includes('class="invoice-pay"'));
+  assert.ok(row(await see("/admin/fees"), bounced).includes('<p class="link-note needs-you">A bank payment was started and did not go through.</p>'));
+  assert.equal(await pay(bounced), "https://checkout.stripe.com/c/pay/cs_test_4");
+  // A page that expired unused is forgotten, and the next try gets a new one.
+  stripe.sessions.get("cs_test_4").status = "expired";
+  await payments.syncAll();
+  assert.equal((await now(bounced)).stripe_session_id, "");
+  assert.equal(await pay(bounced), "https://checkout.stripe.com/c/pay/cs_test_5");
+  // A payment for any other amount is never taken as payment of the invoice.
+  stripe.pay("cs_test_5", { fee: 320 });
+  stripe.sessions.get("cs_test_5").amount_total = 5000;
+  await payments.syncAll();
+  back = await now(bounced);
+  assert.equal(back.paid_at, null);
+  assert.match(back.payment_note, /doesn’t match this invoice’s amount/);
+  stripe.sessions.get("cs_test_5").amount_total = 10000;
+  await payments.syncAll();
+  back = await now(bounced);
+  assert.deepEqual([Boolean(back.paid_at), back.payment_note, back.processor_fee_cents], [true, "", 320]);
+
+  // Stripe doesn't always know its own cut the moment a card is charged. It is filled in when it does.
+  const slow = await win("4000");
+  await pay(slow);
+  stripe.pay("cs_test_6", { fee: null });
+  await payments.syncAll();
+  assert.deepEqual([(await now(slow)).paid_how, (await now(slow)).processor_fee_cents], ["Card through Stripe", null]);
+  stripe.charges.get("ch_6").balance_transaction = "txn_6";
+  stripe.entries.set("txn_6", { id: "txn_6", fee: 610 });
+  await payments.syncAll();
+  assert.equal((await now(slow)).processor_fee_cents, null, "not asked again within ten minutes");
+  await pool.query("update invoices set stripe_checked_at = now() - interval '11 minutes' where id = $1", [slow.invoice.id]);
+  await payments.syncAll();
+  assert.equal((await now(slow)).processor_fee_cents, 610);
+
+  // A refund the owner makes in Stripe shows up in the books by itself.
+  stripe.charges.get("ch_1").amount_refunded = 32000;
+  stripe.charges.get("ch_1").refunded = true;
+  await payments.syncAll();
+  assert.equal(Number((await now(first)).refunded_cents), 0, "looked for twice a day, not every minute");
+  await pool.query("update invoices set stripe_checked_at = now() - interval '13 hours' where id = $1", [first.invoice.id]);
+  await payments.syncAll();
+  paid = await now(first);
+  assert.ok(Number(paid.refunded_cents) === 32000 && paid.refunded_at);
+  assert.deepEqual((await pool.query("select fee_paid, fee_waived from quotes where id = $1", [first.quote.id])).rows[0], { fee_paid: false, fee_waived: true });
+  assert.match(row(await see("/admin/fees"), first), new RegExp("<span>Refunded " + DATE + "</span>"));
+  const summary = cellsOf(unzip(Buffer.from(await (await site.get("/admin/fees/books.xlsx", { cookie: admin.cookie })).arrayBuffer()))["xl/worksheets/sheet1.xml"]);
+  // In: 320 + 450 + 100 + 200. Back out: 320. Stripe kept 9.58 + 3.60 + 3.20 + 6.10.
+  assert.deepEqual([summary.B5, summary.B6, summary.B7, summary.B8], ["1070", "-320", "-22.48", "727.52"]);
+
+  // A restricted key that can't read charges or the balance still marks a payment paid. The page says what to switch on.
+  stripe.deny.add("charge_read");
+  stripe.deny.add("balance_read");
+  status = await payments.check();
+  assert.equal(status.ok, true);
+  assert.equal(status.charges, "The key isn’t allowed to do this yet. In Stripe, edit the key and set Charges and Refunds to Read.");
+  assert.equal(status.balance, "The key isn’t allowed to do this yet. In Stripe, edit the key and set Balance to Read.");
+  settings = await see("/admin/fees/settings");
+  assert.match(settings, /Card or bank on each payment, and refunds you make in Stripe: not yet\. The key isn’t allowed to do this yet\. In Stripe, edit the key and set Charges and Refunds to Read\./);
+  assert.match(settings, /What Stripe kept, for your books: not yet\. .* set Balance to Read\./);
+  const plain = await win("3000");
+  await pay(plain);
+  stripe.pay("cs_test_7", { fee: 465 });
+  const calls = stripe.calls.length;
+  await payments.syncAll();
+  assert.deepEqual([Boolean((await now(plain)).paid_at), (await now(plain)).paid_how, (await now(plain)).processor_fee_cents], [true, "Stripe", null]);
+  assert.match(row(await see("/admin/fees"), plain), new RegExp("<span>Paid " + DATE + " through Stripe</span>"));
+  await payments.syncAll();
+  await payments.syncAll();
+  assert.ok(stripe.calls.length - calls <= 4, "what the key may not read isn't asked for over and over");
+  stripe.deny.clear();
+  await payments.check();
+
+  // A key that can't make payment pages: the company is told online payment isn't working, and the owner is told why.
+  stripe.deny.add("checkout_session_write");
+  const blocked = await win("5000");
+  assert.equal(await pay(blocked), blocked.page + "?pay=off");
+  assert.match(await (await site.get(blocked.page + "?pay=off")).text(), /Online payment isn&rsquo;t working right now\. <a class="plain-link" href="\/contact">Send us a message<\/a>/);
+  assert.match(await see("/admin/fees/settings"), /The last payment page couldn&rsquo;t be made\. The key isn’t allowed to do this yet\. In Stripe, edit the key and set Checkout Sessions to Write\./);
+  stripe.deny.clear();
+  assert.equal(await pay(blocked), "https://checkout.stripe.com/c/pay/cs_test_8");
+  assert.doesNotMatch(await see("/admin/fees/settings"), /couldn&rsquo;t be made/);
+  // Stripe unreachable: pages still open, and the company can still reach the payment page it was given.
+  stripe.down = true;
+  await payments.syncAll();
+  assert.equal((await site.get(blocked.page)).status, 200);
+  assert.equal(await pay(blocked), "https://checkout.stripe.com/c/pay/cs_test_8");
+  stripe.down = false;
+  // The owner marks an invoice "no fee" and the company pays it in the same minute, before its page could be closed.
+  // The payment still counts: the money arrived, so the owner decides what to do with it.
+  await post("/admin/fees/" + blocked.invoice.id, { waived: "on" });
+  stripe.pay("cs_test_8", { fee: 755 });
+  await payments.syncAll();
+  const surprise = await now(blocked);
+  assert.deepEqual([Boolean(surprise.paid_at), surprise.voided_at, surprise.processor_fee_cents], [true, null, 755]);
+  // An invoice can't be paid twice. Marked paid by hand, or marked no fee, with a payment page still out: the page is closed.
+  const zelle = await win("8000");
+  assert.equal(await pay(zelle), "https://checkout.stripe.com/c/pay/cs_test_9");
+  await post("/admin/fees/" + zelle.invoice.id, { paid: "on", how: "Zelle" });
+  await payments.syncAll();
+  assert.deepEqual([stripe.sessions.get("cs_test_9").status, (await now(zelle)).stripe_session_id, (await now(zelle)).payment_note], ["expired", "", ""]);
+  const waived = await win("8000");
+  assert.equal(await pay(waived), "https://checkout.stripe.com/c/pay/cs_test_10");
+  await post("/admin/fees/" + waived.invoice.id, { waived: "on" });
+  assert.equal(await pay(waived), waived.page, "no way to pay an invoice marked no fee");
+  assert.deepEqual([stripe.sessions.get("cs_test_10").status, (await now(waived)).stripe_session_id, Boolean((await now(waived)).voided_at)], ["expired", "", true]);
+  assert.equal(stripe.created.length, 10);
+  // If the company had already paid on that page before the owner marked it paid by hand, the owner is told one has to go back.
+  const twice = await win("8000");
+  assert.equal(await pay(twice), "https://checkout.stripe.com/c/pay/cs_test_11");
+  await post("/admin/fees/" + twice.invoice.id, { paid: "on", how: "Check" });
+  stripe.pay("cs_test_11", { fee: 1190 });
+  await payments.syncAll();
+  assert.deepEqual([(await now(twice)).paid_how, (await now(twice)).stripe_session_id], ["Check", ""]);
+  assert.match((await now(twice)).payment_note, /also paid through Stripe\. One of the two payments should go back/);
+  assert.ok(row(await see("/admin/fees"), twice).includes('<p class="link-note needs-you">This invoice was also paid through Stripe. One of the two payments should go back to the company.</p>'));
+
+  // A page Stripe no longer knows, as after swapping a test key for the live one, is dropped.
+  const moved = await win("1000");
+  await pay(moved);
+  stripe.sessions.delete("cs_test_12");
+  await payments.syncAll();
+  assert.equal((await now(moved)).stripe_session_id, "");
+
+  // A wrong key: Stripe says no, nothing offers to pay through it, and the dashboard says what to check.
+  const wrong = await start({ STRIPE_SECRET_KEY: ["sk", "test", "Z9y8X7w6V5u4T3s2R1q0"].join("_") }, stripe.fetch);
+  status = await wrong.app.locals.payments.check();
+  assert.deepEqual([status.on, status.ok, status.kind], [true, false, "standard"]);
+  assert.equal(status.problem, "Stripe didn’t accept the key. Check that the whole key was pasted, with nothing before or after it.");
+  assert.equal(wrong.app.locals.payments.ready(), false);
+  assert.match(await (await wrong.get(moved.page)).text(), /We&rsquo;ll send you the payment details with this invoice\./);
+  assert.equal((await wrong.get(moved.page + "/pay")).headers.get("location"), moved.page);
+  settings = await (await wrong.get("/admin/fees/settings", { cookie: admin.cookie })).text();
+  assert.match(settings, /<strong>Stripe isn&rsquo;t connected yet\.<\/strong>/);
+  assert.match(settings, /<p class="form-error">Stripe didn’t accept the key\. Check that the whole key was pasted/);
+  assert.doesNotMatch(settings + JSON.stringify(status), /Z9y8X7|sk_test/);
+  // The wrong kind of key is named for what it is.
+  for (const [pasted, says] of [[["pk", "test", "A1b2C3d4E5f6G7h8J9k0"].join("_"), /publishable key \(it starts with pk_\)/], [["whsec", "A1b2C3d4E5f6G7h8J9k0"].join("_"), /webhook signing secret/], ["hello", /doesn’t look like a Stripe key/]]) {
+    const other = await start({ STRIPE_SECRET_KEY: pasted }, stripe.fetch);
+    status = await other.app.locals.payments.check();
+    assert.deepEqual([status.on, status.ok], [false, false], pasted.slice(0, 5));
+    assert.match(status.problem, says);
+    assert.equal(other.app.locals.payments.ready(), false);
+  }
+  // No key at all: off, and the dashboard shows how to connect it.
+  const none = await start();
+  status = await none.app.locals.payments.check();
+  assert.deepEqual([status.on, status.ok, status.problem], [false, false, ""]);
+  await none.app.locals.payments.syncAll();
+  assert.match(await (await none.get("/admin/fees/settings", { cookie: admin.cookie })).text(), /<strong>Stripe isn&rsquo;t connected yet\.<\/strong>[\s\S]*Add a secret named STRIPE_SECRET_KEY/);
+  // The dashboard's own service never talks to Stripe or writes the report, even if it is handed the key.
+  const before = (await pool.query("select value from settings where key = 'stripe_status'")).rows[0].value;
+  const calledBefore = stripe.calls.length;
+  const desk = createPayments({ pool, config: { dashboardOnly: true, stripeKey: key }, fetchImpl: stripe.fetch });
+  assert.deepEqual([desk.enabled, desk.ready(), await desk.check()], [false, false, null]);
+  await desk.syncAll();
+  assert.equal((await pool.query("select value from settings where key = 'stripe_status'")).rows[0].value, before);
+  assert.equal(stripe.calls.length, calledBefore);
+  assert.equal(JSON.parse(before).on, false, "and it reads what the public side last reported");
+
+  await pool.query("delete from settings where key = 'stripe_status'");
 });
 
 test("repairs go to our own crew with no fee", async () => {

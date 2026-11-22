@@ -28,6 +28,20 @@ const { createApp, readConfig } = require("./app");
     }
   });
 
+  // Online payment: try the key once, then ask Stripe every minute about invoices with a payment page out.
+  const payments = app.locals.payments;
+  if (!config.dashboardOnly) {
+    const quietly = (work, what) => work().catch((error) => console.error("Stripe: " + what + " failed:", error.message));
+    quietly(async () => {
+      const status = await payments.check();
+      if (status.on && status.ok) console.log("Online payment through Stripe is on (" + status.mode + " mode).");
+      else if (status.problem) console.log("Online payment through Stripe is off: " + status.problem);
+      else console.log("Online payment through Stripe is off (no STRIPE_SECRET_KEY).");
+      await payments.syncAll();
+    }, "the first check");
+    if (payments.enabled) setInterval(() => quietly(() => payments.syncAll(), "a payment check"), 60 * 1000).unref();
+  }
+
   // Let in-flight requests finish when the host replaces this process.
   process.on("SIGTERM", () => {
     server.close(() => pool.end().then(() => process.exit(0)));

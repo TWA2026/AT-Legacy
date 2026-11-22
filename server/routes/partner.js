@@ -1,10 +1,11 @@
 const express = require("express");
-const { esc, page, briefHtml } = require("../lib/html");
+const { esc, page, briefHtml, formatDate } = require("../lib/html");
 const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { OWN_CREW_TIER } = require("../lib/catalog");
 const { requestRef, companyPath, isOwnerPreview, recordOpen } = require("../lib/links");
 const { listFiles, loadFile, sendFile, plainNames, galleryHtml } = require("../lib/files");
-const { ruleText, termsOf, feeCents, workingText, payUrl, dueDay, loadFee } = require("../lib/fees");
+const { ruleText, termsOf } = require("../lib/fees");
+const { invoiceRef, statusOf, working, invoiceForQuote } = require("../lib/invoices");
 
 const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the company&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
@@ -98,22 +99,24 @@ function quoteForm(quote, error) {
     </form>`;
 }
 
-// What the company owes on a job it won, on the page it already uses, with a way to pay.
-function feeDue(quote, fee) {
-  const amount = feeCents(quote);
-  if (!amount) return "";
-  if (quote.fee_waived) return `<p class="form-note">There is no finder&rsquo;s fee on this job.</p>`;
-  if (quote.fee_paid) return `<p class="form-note">Your finder&rsquo;s fee of ${esc(formatDollars(amount))} is paid. Thank you.</p>`;
-  const due = dueDay(quote.chosen_at, fee.dueDays);
-  const link = payUrl(fee.payLink, requestRef(quote.r_id) + "-Q" + quote.id);
+// What the company owes on a job it won, on the page it already uses, with the way to its invoice.
+function feeDue(invoice) {
+  if (!invoice) return "";
+  const status = statusOf(invoice);
+  const page = "/q/invoice/" + invoice.token;
+  if (status.key === "void") return '<p class="form-note">There is no finder&rsquo;s fee on this job.</p>';
+  if (status.key === "refunded") return '<p class="form-note">Your finder&rsquo;s fee was refunded. Nothing is owed on this job.</p>';
+  if (status.key === "paid") {
+    return `<p class="form-note">Your finder&rsquo;s fee of ${esc(formatDollars(invoice.amount_cents))} is paid. Thank you. <a class="plain-link" href="${esc(page)}">See your receipt</a></p>`;
+  }
   return `<div class="fee-due">
-        <h3>Your finder&rsquo;s fee is ${esc(formatDollars(amount))}</h3>
-        <p>${esc(workingText(quote))}.${due ? " It is due by " + esc(due) + "." : ""} If the job falls through before any work starts, <a class="plain-link" href="/contact">tell us</a> and you owe nothing.</p>
-        ${link ? `<p class="fee-pay"><a class="primary" href="${esc(link)}" rel="noopener">Pay the fee</a></p>` : "<p>We&rsquo;ll send you the bill.</p>"}
+        <h3>Your finder&rsquo;s fee is ${esc(formatDollars(invoice.amount_cents))}</h3>
+        <p>${esc(working(invoice))}. Invoice ${esc(invoiceRef(invoice))} is ${status.overdue ? "overdue. It was due " : "due by "}${esc(formatDate(invoice.due_at))}. If the job falls through before any work starts, <a class="plain-link" href="/contact">tell us</a> and you owe nothing.</p>
+        <p class="fee-pay"><a class="primary" href="${esc(page)}">${status.pending ? "See your invoice" : "See and pay your invoice"}</a></p>
       </div>`;
 }
 
-function render(quote, error, ownerPreview, files = [], fee = null) {
+function render(quote, error, ownerPreview, files = [], invoice = null) {
   const won = quote.chosen_quote_id === quote.id;
   const decided = quote.request_status === "chosen" || quote.request_status === "closed";
   const ownCrew = quote.tier === OWN_CREW_TIER;
@@ -130,7 +133,7 @@ function render(quote, error, ownerPreview, files = [], fee = null) {
         <dt>Prefers</dt><dd>${esc(quote.contact_method)}</dd>
         <dt>Your quote</dt><dd>${esc(formatDollars(quote.amount_cents))}</dd>
       </dl>
-      ${ownCrew || !fee ? "" : feeDue(quote, fee)}
+      ${ownCrew ? "" : feeDue(invoice)}
     </section>`;
   } else if (decided) {
     status = `<section class="app-section"><h2>This request is closed</h2><p>${quote.request_status === "chosen" ? "The customer chose another company." : "The customer is no longer collecting quotes."} Thanks for your time.</p></section>`;
@@ -174,7 +177,9 @@ module.exports = function partnerRoutes({ pool, config, notify = async () => fal
       const quote = await loadQuote(pool, req.params.token);
       if (!quote) return next();
       await recordOpen(pool, req, { requestId: quote.r_id, quoteId: quote.id });
-      res.send(render(quote, "", isOwnerPreview(req), await sharedFiles(pool, quote), await loadFee(pool, config)));
+      // A job this company won carries an invoice for its fee.
+      const invoice = quote.chosen_quote_id === quote.id && Number(quote.fee_percent) > 0 ? await invoiceForQuote(pool, config, quote.id) : null;
+      res.send(render(quote, "", isOwnerPreview(req), await sharedFiles(pool, quote), invoice));
     } catch (error) {
       next(error);
     }

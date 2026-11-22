@@ -80,9 +80,6 @@ function feeCents(quote) {
   return fee;
 }
 
-// The same sum inside a query, for totals. `q` is the quotes table's alias.
-const FEE_SQL = "least(greatest(round(q.amount_cents * q.fee_percent / 100.0), nullif(q.fee_min_cents, 0)), nullif(q.fee_max_cents, 0))";
-
 const percentText = (percent) => String(Number(percent)) + "%";
 
 // "5% of the price you quote, at least $25 and at most $750"
@@ -112,8 +109,8 @@ function workingText(quote) {
   return text;
 }
 
-// The owner's payment page, tagged with the job's reference where the page can take one (Stripe's can),
-// so a payment can be matched to its job. The reference is a job number, never anything personal.
+// The owner's payment page, tagged with the invoice's number where the page can take one (Stripe's can),
+// so a payment can be matched to its invoice. The reference is a number, never anything personal.
 function payUrl(link, reference) {
   if (!link) return "";
   try {
@@ -125,13 +122,6 @@ function payUrl(link, reference) {
   } catch (error) {
     return "";
   }
-}
-
-// The day a fee is due: so many days after the customer chose. "Dec 5, 2026"
-function dueDay(chosenAt, dueDays) {
-  if (!chosenAt) return "";
-  const due = new Date(new Date(chosenAt).getTime() + Number(dueDays) * 86400000);
-  return due.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/New_York" });
 }
 
 // The rule as the public pages state it.
@@ -151,6 +141,6 @@ function fillFeePage(html, shown) {
 }
 
 module.exports = {
-  DEFAULT_FEE, FEE_SQL, defaultFee, checkFee, loadFee, saveFee, termsOf, feeCents, ruleText, limitsText, workingText,
-  payUrl, dueDay, shownFee, fillFeePage, percentText
+  DEFAULT_FEE, defaultFee, checkFee, loadFee, saveFee, termsOf, feeCents, ruleText, limitsText, workingText,
+  payUrl, shownFee, fillFeePage, percentText
 };

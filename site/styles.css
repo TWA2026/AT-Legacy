@@ -4019,3 +4019,338 @@ html {
 .fee-due .fee-pay {
   margin-top: 14px;
 }
+
+/* Dashboard, Fees: invoices in sections, how one was paid, and the books. */
+.fee-part {
+  gap: 12px;
+  margin-bottom: 40px;
+}
+
+.owner-row p.owner-row-main {
+  font-size: 1.2rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.fee-row .link-note {
+  grid-column: 1 / -1;
+  max-width: 640px;
+}
+
+.fee-row .link-note.needs-you {
+  padding-left: 10px;
+  border-left: 4px solid var(--gold);
+  color: var(--navy);
+  font-weight: 600;
+}
+
+.fee-row .owner-actions {
+  margin: 4px 0 0;
+}
+
+/* A settled invoice keeps its receipt and switches folded away until they are wanted. */
+.fee-more {
+  grid-column: 1 / -1;
+}
+
+.fee-more summary {
+  padding: 9px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.fee-more summary span {
+  text-decoration: underline;
+  text-decoration-color: var(--gold);
+  text-decoration-thickness: 3px;
+  text-underline-offset: 0.2em;
+}
+
+.fee-more summary:focus-visible {
+  outline: 3px solid var(--bay);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.fee-more[open] summary {
+  margin-bottom: 8px;
+}
+
+.fee-more .bill {
+  margin-bottom: 10px;
+}
+
+.fee-how {
+  display: grid;
+  gap: 4px;
+}
+
+.fee-how select {
+  min-height: 48px;
+  padding: 10px 40px 10px 12px;
+  border: 1px solid var(--slate);
+  border-radius: 6px;
+  background-color: var(--white);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 5 5-5' fill='none' stroke='%2313283A' stroke-width='1.8'/%3E%3C/svg%3E");
+  background-position: right 14px center;
+  background-repeat: no-repeat;
+  background-size: 12px 8px;
+  color: var(--navy);
+  font: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.fee-how select:focus-visible {
+  outline: 3px solid var(--bay);
+  outline-offset: 2px;
+}
+
+@media (min-width: 720px) {
+  .fee-how {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+}
+
+/* An invoice or receipt for a finder's fee, as the company sees it. Like the certificate, it stands
+   alone so it prints cleanly on one upright page. */
+.invoice-page {
+  padding: clamp(12px, 3vw, 32px);
+  background: var(--shell);
+}
+
+.invoice-page .owner-preview,
+.invoice-actions {
+  max-width: 760px;
+  margin: 0 auto 16px;
+}
+
+.invoice-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.invoice {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: clamp(22px, 5vw, 48px);
+  border: 1px solid rgba(19, 40, 58, 0.3);
+  border-top: 8px solid var(--navy);
+  background: var(--white);
+}
+
+.invoice-head {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 22px;
+  border-bottom: 2px solid var(--navy);
+}
+
+.invoice .lockup {
+  gap: 6px;
+}
+
+.invoice .lockup-name {
+  font-size: clamp(1.7rem, 6vw, 2.2rem);
+}
+
+.invoice .lockup-sub {
+  font-size: clamp(0.68rem, 2.2vw, 0.85rem);
+}
+
+.invoice .pinstripe {
+  height: 9px;
+  background:
+    linear-gradient(var(--gold), var(--gold)) top / 100% 5px no-repeat,
+    linear-gradient(var(--navy), var(--navy)) bottom / 100% 2px no-repeat;
+}
+
+.invoice-title h1 {
+  margin: 0;
+  font-family: var(--slab);
+  font-size: clamp(1.9rem, 6.6vw, 2.6rem);
+  font-weight: 400;
+  line-height: 1;
+}
+
+.invoice-number {
+  margin: 6px 0 0;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.invoice-status {
+  margin: 22px 0 0;
+  padding: 12px 16px;
+  border-left: 6px solid var(--bay);
+  background: var(--shell);
+  font-weight: 800;
+}
+
+.invoice-status.is-late {
+  border-left-color: var(--gold);
+}
+
+.invoice-status.is-paid {
+  border-left-color: var(--glass);
+}
+
+.invoice-status.is-closed {
+  border-left-color: var(--slate);
+}
+
+.invoice-facts {
+  display: grid;
+  gap: 16px 32px;
+  margin: 24px 0 0;
+}
+
+.invoice-facts div {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+
+.invoice-facts dt {
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+.invoice-facts dd {
+  margin: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.invoice-facts dd span {
+  display: block;
+  font-weight: 400;
+}
+
+.invoice-lines {
+  width: 100%;
+  margin: 28px 0 0;
+  border-collapse: collapse;
+}
+
+.invoice-lines th,
+.invoice-lines td {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(19, 40, 58, 0.2);
+  text-align: left;
+  vertical-align: top;
+}
+
+.invoice-lines thead th {
+  border-bottom: 2px solid var(--navy);
+  color: var(--slate);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.invoice-lines .num {
+  padding-left: 16px;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.invoice-lines td span {
+  display: block;
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+.invoice-lines tfoot th,
+.invoice-lines tfoot td {
+  padding-top: 16px;
+  border-bottom: 0;
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.invoice-lines tfoot td {
+  font-family: var(--slab);
+  font-size: clamp(1.5rem, 5vw, 1.9rem);
+  font-weight: 400;
+  line-height: 1.1;
+}
+
+.invoice-next {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  margin: 26px 0 0;
+}
+
+.invoice-next p {
+  margin: 0;
+}
+
+.invoice-pay .primary {
+  min-width: 220px;
+  text-align: center;
+}
+
+.invoice-note {
+  max-width: 36em;
+  padding-left: 12px;
+  border-left: 4px solid var(--gold);
+  font-weight: 600;
+}
+
+.invoice-small {
+  max-width: 40em;
+  margin: 0;
+  color: var(--slate);
+  font-size: 0.95rem;
+}
+
+.invoice-why {
+  max-width: none;
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(19, 40, 58, 0.2);
+}
+
+@media (min-width: 560px) {
+  .invoice-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .invoice-head {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+    gap: 20px 32px;
+  }
+
+  .invoice-title {
+    text-align: right;
+  }
+}
+
+@media print {
+  .invoice-actions,
+  .invoice-page .owner-preview,
+  .invoice-pay,
+  .invoice-pay-note {
+    display: none;
+  }
+
+  .invoice-page {
+    padding: 0;
+    background: var(--white);
+  }
+
+  /* The color rule keeps the navy and gold lines when the browser leaves backgrounds out. */
+  .invoice {
+    max-width: none;
+    border: 0;
+    border-top: 8px solid var(--navy);
+    break-inside: avoid;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

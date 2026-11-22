@@ -5,7 +5,9 @@ const { workbook } = require("../lib/xlsx");
 const { formatDollars } = require("../lib/validate");
 const { SERVICES, SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
 const { loadOff, saveLive } = require("../lib/services");
-const { FEE_SQL, checkFee, loadFee, saveFee, feeCents, ruleText, workingText, payUrl, dueDay } = require("../lib/fees");
+const { checkFee, loadFee, saveFee, feeCents, ruleText } = require("../lib/fees");
+const invoices = require("../lib/invoices");
+const { invoiceRef, money, statusOf } = invoices;
 const { SHARING, LIMITS, megabytes, fileSize, listFiles, loadFile, storageUsed, sendFile, galleryHtml } = require("../lib/files");
 const {
   MAX_LABEL, MAX_POINTS, loadStandard, saveStandard, standardFromForm, possiblePoints, itemKey, metFromForm, scoreVisit,
@@ -63,7 +65,7 @@ function nextStep(r, quotes) {
     const company = chosen ? chosen.company : "A company";
     const hasFee = chosen && Number(chosen.fee_percent) > 0;
     let rest = "There is no fee on this one. Close the request when the job is done.";
-    if (hasFee) rest = chosen.fee_paid ? "The fee is marked paid. Close the request when you’re done with it." : "Send the bill from Fees.";
+    if (hasFee) rest = chosen.fee_paid ? "The fee is marked paid. Close the request when you’re done with it." : "Send the invoice from Fees.";
     if (hasFee && chosen.fee_waived) rest = "You waived the fee on this one. Close the request when the job is done.";
     return { needsYou: false, short: company + " was chosen", long: "The customer chose " + company + ". " + rest };
   }
@@ -96,7 +98,7 @@ function options(values, selected) {
   return values.map((value) => `<option${value === selected ? " selected" : ""}>${esc(value)}</option>`).join("");
 }
 
-module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
+module.exports = function adminRoutes({ pool, secret, config, fetchImpl, payments }) {
   const router = express.Router();
   const loginLimit = rateLimiter({ limit: 10, windowMs: 15 * 60 * 1000 });
 
@@ -318,11 +320,11 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       // Companies waiting on the owner: paperwork to check, a site visit to make, or an approval to give.
       const now = today();
       const waiting = (await pool.query("select * from partners where status in ('applied', 'verified')")).rows.filter((p) => vendorStep(p, now).label).length;
-      const owed = Number((await pool.query(
-        `select coalesce(sum(${FEE_SQL}), 0) as cents
-           from requests r join quotes q on q.id = r.chosen_quote_id
-          where q.fee_percent > 0 and not q.fee_paid and not q.fee_waived`
-      )).rows[0].cents);
+      // Jobs won before invoices existed get theirs here. Then: what is owed, and how much of it is late.
+      await invoices.issueMissing(pool, config);
+      const unpaid = (await pool.query("select * from invoices where paid_at is null and voided_at is null")).rows;
+      const owed = unpaid.reduce((total, invoice) => total + Number(invoice.amount_cents), 0);
+      const late = unpaid.filter((invoice) => { const status = statusOf(invoice); return status.overdue && !status.pending; }).length;
       // Documents a customer added that no company can see until the owner decides.
       const toCheck = (await pool.query(
         `select f.request_id, count(*)::int as files from request_files f join requests r on r.id = f.request_id
@@ -343,6 +345,7 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       if (needy.length) todo.push(`<li><a href="/admin/requests/${needy[0].r.id}">${plural(needy.length, "request needs", "requests need")} companies</a></li>`);
       if (waiting) todo.push(`<li><a href="/admin/partners">${plural(waiting, "company needs", "companies need")} a check or a visit</a></li>`);
       if (owed > 0) todo.push(`<li><a href="/admin/fees">${esc(formatDollars(owed))} in finder’s fees to collect</a></li>`);
+      if (late) todo.push(`<li><a href="/admin/fees#overdue">${plural(late, "invoice is", "invoices are")} overdue</a></li>`);
       if (toCheck.length) {
         const count = toCheck.reduce((sum, row) => sum + row.files, 0);
         todo.push(`<li><a href="/admin/requests/${toCheck[0].request_id}#files">${plural(count, "document", "documents")} to check before any company sees ${count === 1 ? "it" : "them"}</a></li>`);
@@ -523,6 +526,10 @@ ${tiers}
       const requestId = Number(body.request) || 0;
       const quoteId = Number(body.quote) || null;
       if (!SEND_EVENTS.includes(body.event)) return res.status(400).end();
+      if (body.invoice) {
+        await invoices.recordSend(pool, body.invoice, body.event);
+        return res.status(204).end();
+      }
       const known = quoteId
         ? await pool.query("select 1 from quotes where id = $1 and request_id = $2", [quoteId, requestId])
         : await pool.query("select 1 from requests where id = $1", [requestId]);
@@ -599,9 +606,7 @@ ${tiers}
       if (!r) return next();
       const count = async (table) => (await pool.query(`select count(*)::int as n from ${table} where request_id = $1`, [r.id])).rows[0].n;
       const [quotes, files, ratings] = [await count("quotes"), await count("request_files"), await count("ratings")];
-      const chosen = r.chosen_quote_id
-        ? (await pool.query("select p.company, q.amount_cents, q.fee_percent, q.fee_min_cents, q.fee_max_cents from quotes q join partners p on p.id = q.partner_id where q.id = $1", [r.chosen_quote_id])).rows[0]
-        : null;
+      const kept = (await pool.query("select * from invoices where request_id = $1 order by number", [r.id])).rows;
       res.send(adminPage(req, {
         current: "requests", back: { href: "/admin/requests/" + r.id, label: "Back to the request" },
         title: "Delete " + requestRef(r.id), heading: "Delete this request?",
@@ -614,7 +619,10 @@ ${tiers}
         <li>${plural(files, "picture or file", "pictures and files")}</li>
         ${ratings ? "<li>The customer&rsquo;s rating</li>" : ""}
       </ul>
-      ${chosen ? `<p class="form-error">The customer chose ${esc(chosen.company)} for this job. Its finder&rsquo;s fee record (${esc(formatDollars(feeCents(chosen)))}) goes too. If you still need that for your books, write it down first.</p>` : ""}
+      ${kept.length ? `<h2>What stays</h2>
+      <ul class="scope">
+        ${kept.map((invoice) => `<li>Invoice ${invoiceRef(invoice)} to ${esc(invoice.company)} (${esc(formatDollars(invoice.amount_cents))}) stays in your books. It holds nothing about the customer. ${invoice.paid_at ? "It is paid and stays that way." : invoice.voided_at ? "It is already marked no fee." : "It is unpaid, so it will be cancelled."}</li>`).join("")}
+      </ul>` : ""}
       <form method="post" action="/admin/requests/${r.id}/delete" class="done-actions">
         ${csrfField}
         <button class="primary" type="submit" name="confirm" value="yes">Delete it for good</button>
@@ -631,6 +639,8 @@ ${tiers}
     try {
       const id = Number(req.params.id) || 0;
       if (req.body.confirm !== "yes") return res.redirect(303, "/admin/requests/" + id);
+      // An unpaid invoice is cancelled first. Every invoice stays in the books, without its request.
+      await invoices.release(pool, id, invoices.DELETED);
       // Quotes, files, link history, and the rating go with it (on delete cascade).
       await pool.query("delete from requests where id = $1", [id]);
       res.redirect(303, "/admin");
@@ -645,6 +655,8 @@ ${tiers}
       if (req.body.status === "closed") {
         await pool.query("update requests set status = 'closed' where id = $1 and status <> 'chosen'", [id]);
       } else if (req.body.status === "reopen") {
+        // The company no longer has the job, so an unpaid invoice for it is cancelled.
+        await invoices.release(pool, id, invoices.UNDONE);
         await pool.query(
           `update requests set chosen_quote_id = null,
                   status = case when exists (select 1 from quotes where request_id = $1) then 'collecting' else 'new' end
@@ -1409,10 +1421,45 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
     }
   });
 
-  // Fee settings: the one rule every new brief carries, and the owner's payment page.
-  const FEE_PAGE = { current: "fees", back: { href: "/admin/fees", label: "Back to fees" }, title: "Fee settings", heading: "Fee settings" };
+  // Fee settings: the one rule every new brief carries, and how companies pay.
+  const FEE_PAGE = { current: "fees", back: { href: "/admin/fees", label: "Back to fees" }, title: "Fee settings", heading: "Fee settings", intro: "One rule for every size of job, and how companies pay you." };
 
-  function feeSettingsBody(fee, { error = "", saved = false, form = null } = {}) {
+  // What the public side last reported about Stripe. It holds the key. This page only reads its report.
+  function stripeSection(status) {
+    const checked = status && status.checkedAt ? `<p class="form-note">Last checked ${esc(formatDateTime(status.checkedAt))}.</p>` : "";
+    if (status && status.on && status.ok) {
+      const can = (state, ready) => (state === "ok" ? `<li>${ready}: ready</li>` : `<li>${ready}: not yet. ${esc(state || "Not checked yet.")}</li>`);
+      return `<section class="app-section owner-after" id="stripe">
+      <h2>Online payment</h2>
+      <p class="owner-next"><strong>Stripe is connected${status.mode === "test" ? " in test mode" : ""}.</strong> A company pays the exact amount from its invoice, and the invoice marks itself paid here within a minute or two.</p>
+      ${status.mode === "test" ? '<p class="form-error">This is a test key, so no real money moves. Swap it for the live key in Slipway when you are ready to be paid.</p>' : ""}
+      <ul class="scope">
+        <li>Payment pages for the exact amount: ready</li>
+        ${can(status.charges, "Card or bank on each payment, and refunds you make in Stripe")}
+        ${can(status.balance, "What Stripe kept, for your books")}
+      </ul>
+      ${status.lastCheckoutProblem ? `<p class="form-error">The last payment page couldn&rsquo;t be made. ${esc(status.lastCheckoutProblem)}</p>` : ""}
+      ${status.lastPaidAt ? `<p class="form-note">Last payment reported by Stripe: ${esc(formatDateTime(status.lastPaidAt))}.</p>` : ""}
+      ${checked}
+      ${status.kind === "standard" ? '<p class="form-note">This is a full-access key. It works. A restricted key that can only make payment pages and read payments is safer, and Stripe recommends it.</p>' : ""}
+    </section>`;
+    }
+    const problem = status && status.problem ? `<p class="form-error">${esc(status.problem)}</p>` : "";
+    return `<section class="app-section owner-after" id="stripe">
+      <h2>Online payment</h2>
+      <p class="owner-next needs-you"><strong>Stripe isn&rsquo;t connected yet.</strong> Until it is, companies pay through your payment link above, or another way, and you mark each fee paid yourself.</p>
+      ${problem}
+      <p class="form-note">With Stripe connected, a company pays the exact amount from its invoice and the invoice marks itself paid. To connect it:</p>
+      <ol class="scope">
+        <li>In Stripe, open API keys and create a restricted key. Set Checkout Sessions to Write. Set Charges and Refunds, and Balance, to Read.</li>
+        <li>In Slipway, open the hub service, then Environment. Add a secret named STRIPE_SECRET_KEY with the key as its value, then save and deploy.</li>
+        <li>Come back to this page a minute later. It will say Stripe is connected.</li>
+      </ol>
+      ${checked}
+    </section>`;
+  }
+
+  function feeSettingsBody(fee, stripe, { error = "", saved = false, form = null } = {}) {
     const shown = form || { percent: fee.percent, min: fee.minCents ? fee.minCents / 100 : "", max: fee.maxCents ? fee.maxCents / 100 : "", days: fee.dueDays, pay_link: fee.payLink };
     const example = (label, cents) => `<li>${esc(label)}, quoted at ${esc(formatDollars(cents))}: <strong>${esc(formatDollars(feeCents({ amount_cents: cents, fee_percent: fee.percent, fee_min_cents: fee.minCents, fee_max_cents: fee.maxCents })))}</strong></li>`;
     const field = (name, label, help, attrs) => `<div class="field">
@@ -1420,6 +1467,7 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
             <input id="${name}" name="${name}" ${attrs} value="${esc(shown[name] === undefined ? "" : shown[name])}" aria-describedby="${name}-help">
             <span class="help" id="${name}-help">${help}</span>
           </div>`;
+    const connected = Boolean(stripe && stripe.on && stripe.ok);
     return `    ${saved ? '<p class="visit-result" role="status"><strong>Saved.</strong> Briefs you send from now on carry this rule. Jobs already sent keep the terms they had.</p>' : ""}
     <form class="quote-form" method="post" action="/admin/fees/settings">
       ${csrfField}
@@ -1431,12 +1479,14 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
           ${field("percent", "Percent of the quoted price", "From 0.5 to 20.", 'type="text" inputmode="decimal" maxlength="5" required')}
           ${field("min", "Smallest fee, in dollars", "What a small job pays. Leave empty for none.", 'type="text" inputmode="decimal" maxlength="6"')}
           ${field("max", "Largest fee, in dollars", "What the biggest job pays. Leave empty for no limit.", 'type="text" inputmode="decimal" maxlength="8"')}
-          ${field("days", "Days to pay", "Counted from the day the customer chooses.", 'type="text" inputmode="numeric" maxlength="2" required')}
+          ${field("days", "Days to pay", "Counted from the day the customer chooses. Each invoice keeps the due day it was given.", 'type="text" inputmode="numeric" maxlength="2" required')}
         </div>
       </section>
       <section class="form-part">
         <h2>Your payment link</h2>
-        <p class="form-note">Paste the address of your payment page from Stripe, Square, or whichever service you use. Every bill carries it. With a Stripe link, each bill also adds the job number, so you can match a payment to its job.</p>
+        <p class="form-note">${connected
+    ? "Not needed while Stripe is connected: each invoice has its own Pay button. A link saved here is only used if Stripe is ever disconnected."
+    : "Paste the address of your payment page from Stripe, Square, or whichever service you use. Each invoice then has a Pay online button that opens it, and the company types in the amount."}</p>
         <div class="fields">
           <div class="field wide">
             <label for="pay_link">Payment link <span class="optional">(optional)</span></label>
@@ -1446,6 +1496,7 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
       </section>
       <button class="primary" type="submit">Save the fee settings</button>
     </form>
+    ${stripeSection(stripe)}
     <section class="app-section owner-after">
       <h2>What that comes to</h2>
       <p class="form-note">With the rule as saved: ${esc(ruleText(fee, "the quoted price"))}.</p>
@@ -1460,7 +1511,7 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
 
   router.get("/fees/settings", async (req, res, next) => {
     try {
-      res.send(adminPage(req, { ...FEE_PAGE, intro: "One rule for every size of job, and the page companies pay you on.", body: feeSettingsBody(await loadFee(pool, config), { saved: req.query.saved === "1" }) }));
+      res.send(adminPage(req, { ...FEE_PAGE, body: feeSettingsBody(await loadFee(pool, config), await payments.readStatus(), { saved: req.query.saved === "1" }) }));
     } catch (error) {
       next(error);
     }
@@ -1470,7 +1521,7 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
     try {
       const { fee, problem } = checkFee(req.body);
       if (problem) {
-        return res.status(400).send(adminPage(req, { ...FEE_PAGE, intro: "One rule for every size of job, and the page companies pay you on.", body: feeSettingsBody(await loadFee(pool, config), { error: problem, form: req.body }) }));
+        return res.status(400).send(adminPage(req, { ...FEE_PAGE, body: feeSettingsBody(await loadFee(pool, config), await payments.readStatus(), { error: problem, form: req.body }) }));
       }
       await saveFee(pool, fee);
       res.redirect(303, "/admin/fees/settings?saved=1");
@@ -1479,72 +1530,234 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
     }
   });
 
-  // The bill for one won job: words the owner can copy, text, or email, with the payment link on the end.
-  function billBlock(job, amount, due, fee) {
-    const ref = requestRef(job.r_id);
-    const link = payUrl(fee.payLink, ref + "-Q" + job.id);
-    const words = "AT Legacy Services: the finder’s fee for job " + ref + " (" + job.service + ") is " + formatDollars(amount) + (due ? ", due by " + due : "") + "." + (link ? " Pay here:" : "");
-    const whole = words + (link ? " " + link : "");
-    const who = firstName(job.contact_name) || job.company;
-    const sms = textLink(job.partner_phone, whole);
-    const mail = emailLink(job.partner_email, "AT Legacy Services fee, " + ref + ", " + formatDollars(amount), words + (link ? "\n\n" + link : ""));
-    const actions = [`<li><button class="text-button" type="button" data-copy-text="${esc(whole)}">Copy the bill</button></li>`];
-    if (sms) actions.push(`<li><a href="${esc(sms)}">Text it to ${esc(who)}</a></li>`);
-    if (mail) actions.push(`<li><a href="${esc(mail)}">Email it to ${esc(who)}</a></li>`);
-    if (link) actions.push(`<li><a href="${esc(link)}" target="_blank" rel="noopener">Open the payment page</a></li>`);
-    return `<div class="link-row bill">
-              <p class="link-name">Bill to send</p>
-              <p class="bill-text">${esc(words)}${link ? ` <span class="bill-link">${esc(link)}</span>` : ""}</p>
-              ${link ? "" : '<p class="link-note">Add your payment link in <a class="plain-link" href="/admin/fees/settings">Fee settings</a> and every bill will carry it.</p>'}
+  // What the owner sends for one invoice: the words and the link to the company's invoice page, with
+  // ways to copy, text, or email them. Each send is recorded, and so is each time the company opens the page.
+  function sendBlock(invoice, link, kind) {
+    const ref = invoiceRef(invoice);
+    const due = formatDate(invoice.due_at);
+    const words = kind === "reminder" ? invoices.reminderWords(invoice, due) : kind === "receipt" ? invoices.receiptWords(invoice) : invoices.billWords(invoice, due);
+    const whole = words + " " + link;
+    const who = firstName(invoice.contact_name) || invoice.company;
+    const subject = kind === "receipt" ? "Receipt for invoice " + ref : kind === "reminder" ? "Reminder: invoice " + ref + ", " + money(invoice.amount_cents) : "Invoice " + ref + ", " + money(invoice.amount_cents);
+    const sms = textLink(invoice.partner_phone, whole);
+    const mail = emailLink(invoice.partner_email, "AT Legacy Services: " + subject.charAt(0).toLowerCase() + subject.slice(1), words + "\n\n" + link);
+    const actions = [`<li><button class="text-button" type="button" data-copy-text="${esc(whole)}" data-track-event="copied">Copy it</button></li>`];
+    if (sms) actions.push(`<li><a href="${esc(sms)}" data-track-event="texted">Text it to ${esc(who)}</a></li>`);
+    if (mail) actions.push(`<li><a href="${esc(mail)}" data-track-event="emailed">Email it to ${esc(who)}</a></li>`);
+    actions.push(`<li><a href="${esc(link)}?owner=1" target="_blank" rel="noopener">Open the ${kind === "receipt" ? "receipt" : "invoice"}</a></li>`);
+    const sent = invoice.last_send ? SENT_WORDS[invoice.last_send] + " " + formatDateTime(invoice.last_sent_at) + "." : "Not sent from here yet.";
+    const opened = invoice.opens ? "Opened " + plural(invoice.opens, "time", "times") + ", last " + formatDateTime(invoice.last_opened_at) + "." : "Not opened yet.";
+    return `<div class="link-row bill" data-track-invoice="${Number(invoice.id)}" data-csrf="__CSRF__">
+              <p class="link-name">${kind === "reminder" ? "Reminder to send" : kind === "receipt" ? "Receipt to send" : "Invoice to send"}</p>
+              <p class="bill-text">${esc(words)} <span class="bill-link">${esc(link)}</span></p>
+              ${kind === "receipt" ? "" : `<p class="link-activity">${esc(sent)} ${esc(opened)}</p>`}
               <ul class="link-actions">${actions.join("")}</ul>
             </div>`;
   }
 
-  // Fees: one row per job a customer awarded to a partner. Each one still owed carries a bill ready to send.
+  // One invoice on the Fees page.
+  function invoiceRow(req, invoice, { stripeOn, payLink }) {
+    const status = statusOf(invoice);
+    const ref = invoiceRef(invoice);
+    const link = siteUrl(req) + "/q/invoice/" + invoice.token;
+    const amount = formatDollars(invoice.amount_cents);
+    const open = status.key === "open";
+    const title = invoice.has_request
+      ? `<a class="owner-row-main" href="/admin/requests/${Number(invoice.request_id)}">${ref} <span>${esc(invoice.service)} for ${esc(invoice.customer_name)}</span></a>`
+      : `<p class="owner-row-main">${ref} <span>${esc(invoice.service)}</span></p>`;
+    let state;
+    let block = "";
+    // Something the owner should see without opening anything, such as a bank payment that failed.
+    let note = "";
+    if (open) {
+      const when = status.pending ? "Bank payment on its way since " + formatDate(invoice.pending_since)
+        : status.overdue ? "Overdue by " + plural(status.daysLate, "day", "days") : "Due by " + formatDate(invoice.due_at);
+      state = `<strong class="fee-amount">${esc(amount)}</strong> <span>${esc(when)}</span>`;
+      if (status.pending) {
+        note = `<p class="link-note">The company paid from its bank on Stripe. That takes a few business days, and this invoice marks itself paid when the money arrives. <a class="plain-link" href="${esc(link)}?owner=1" target="_blank" rel="noopener">Open the invoice</a></p>`;
+      } else {
+        if (invoice.payment_note) note = `<p class="link-note needs-you">${esc(invoice.payment_note)}</p>`;
+        block = sendBlock(invoice, link, status.overdue ? "reminder" : "bill");
+      }
+    } else if (status.key === "paid") {
+      const kept = Number(invoice.processor_fee_cents) > 0 ? ". Stripe kept " + money(invoice.processor_fee_cents) : "";
+      const part = status.partRefunded ? ". " + money(status.partRefunded) + " was refunded" : "";
+      const how = invoices.ownerPaidWords(invoice);
+      state = `<strong class="fee-amount">${esc(amount)}</strong> <span>Paid ${esc(formatDate(invoice.paid_at))}${how ? " " + esc(how) : ""}${esc(kept)}${esc(part)}</span>`;
+      if (invoice.payment_note) note = `<p class="link-note needs-you">${esc(invoice.payment_note)}</p>`;
+      block = sendBlock(invoice, link, "receipt");
+    } else if (status.key === "refunded") {
+      state = `<strong class="fee-amount fee-waived">${esc(amount)}</strong> <span>Refunded ${esc(formatDate(invoice.refunded_at))}</span>`;
+    } else {
+      state = `<strong class="fee-amount fee-waived">${esc(amount)}</strong> <span>No fee${invoice.current ? "" : ". " + esc(invoice.void_reason)}</span>`;
+    }
+    // The owner's two switches. A payment Stripe reported stays ticked, and a cancelled invoice has none.
+    const viaStripe = Boolean(invoice.paid_at && invoice.stripe_payment_intent);
+    const settled = status.key === "paid" || status.key === "refunded";
+    const preferred = !stripeOn && payLink ? "Payment link" : "";
+    const form = status.key === "void" && !invoice.current ? "" : `<form method="post" action="/admin/fees/${Number(invoice.id)}" class="fee-form">
+              ${csrfField}
+              ${viaStripe ? '<input type="hidden" name="paid" value="on">' : `<label class="choice"><input type="checkbox" name="paid"${settled ? " checked" : ""}> <span>Fee paid</span></label>`}
+              ${settled ? "" : `<label class="fee-how" for="how-${Number(invoice.id)}">Paid by <select id="how-${Number(invoice.id)}" name="how"><option value="">Choose one</option>${options(invoices.PAID_HOW, preferred)}</select></label>`}
+              <label class="choice"><input type="checkbox" name="waived"${status.key === "void" || status.key === "refunded" ? " checked" : ""}> <span>${settled ? "I refunded it. No fee on this job" : "No fee on this job"}</span></label>
+              <button class="secondary" type="submit">Save</button>
+            </form>`;
+    // An invoice that is settled folds its receipt and switches away, so a long history stays easy to scan.
+    const more = open || !(block || form) ? block + "\n            " + form : `<details class="fee-more">
+              <summary><span>${status.key === "paid" ? "Send the receipt, or change this" : "Change this"}</span></summary>
+              ${block}
+              ${form}
+            </details>`;
+    return `<li class="owner-row fee-row${open && !status.pending ? " needs-you" : ""}" id="invoice-${Number(invoice.number)}">
+            ${title}
+            <p class="owner-row-facts">${esc(invoice.job_ref)}, ${esc(invoice.company)}<br>${esc(invoices.working(invoice))}. Issued ${esc(formatDate(invoice.issued_at))}.</p>
+            <p class="owner-row-state">${state}</p>
+            ${note}
+            ${more}
+          </li>`;
+  }
+
+  // Fees: every invoice, with the ones that need the owner first.
   router.get("/fees", async (req, res, next) => {
     try {
+      await invoices.issueMissing(pool, config);
       const fee = await loadFee(pool, config);
-      const jobs = (await pool.query(
-        `select q.*, p.company, p.contact_name, p.phone as partner_phone, p.email as partner_email,
-                r.service, r.name as customer_name, r.id as r_id, r.chosen_at
-           from requests r
-           join quotes q on q.id = r.chosen_quote_id
-           join partners p on p.id = q.partner_id
-          where q.fee_percent > 0
-          order by (q.fee_paid or q.fee_waived), r.created_at desc`
-      )).rows;
-      let owed = 0;
-      let paid = 0;
-      const rows = jobs.map((job) => {
-        const amount = feeCents(job);
-        const open = !job.fee_paid && !job.fee_waived;
-        if (job.fee_paid) paid += amount; else if (open) owed += amount;
-        const due = dueDay(job.chosen_at, fee.dueDays);
-        const state = job.fee_waived ? "Waived" : job.fee_paid ? "Paid" : "Owed to you";
-        return `<li class="owner-row fee-row${open ? " needs-you" : ""}">
-            <a class="owner-row-main" href="/admin/requests/${job.r_id}">${esc(job.service)} <span>for ${esc(job.customer_name)}</span></a>
-            <p class="owner-row-facts">${requestRef(job.r_id)}, ${esc(job.company)}<br>${esc(workingText(job))}${open && due ? ". Due by " + esc(due) + "." : "."}</p>
-            <p class="owner-row-state"><strong class="fee-amount${job.fee_waived ? " fee-waived" : ""}">${esc(formatDollars(amount))}</strong> <span>${state}</span></p>
-            ${open ? billBlock(job, amount, due, fee) : ""}
-            <form method="post" action="/admin/fees/${job.id}" class="fee-form">
-              ${csrfField}
-              <label class="choice"><input type="checkbox" name="paid"${job.fee_paid ? " checked" : ""}> <span>Fee paid</span></label>
-              <label class="choice"><input type="checkbox" name="waived"${job.fee_waived ? " checked" : ""}> <span>No fee on this job</span></label>
-              <button class="secondary" type="submit">Save</button>
-            </form>
-          </li>`;
-      }).join("\n");
+      const stripe = await payments.readStatus();
+      const stripeOn = Boolean(stripe && stripe.on && stripe.ok);
+      const all = await invoices.loadInvoices(pool);
+      const withStatus = all.map((invoice) => ({ invoice, status: statusOf(invoice) }));
+      const pick = (test) => withStatus.filter(test).map((item) => item.invoice);
+      const byDue = (a, b) => new Date(a.due_at) - new Date(b.due_at);
+      const late = pick((item) => item.status.key === "open" && item.status.overdue && !item.status.pending).sort(byDue);
+      const waiting = pick((item) => item.status.key === "open" && (!item.status.overdue || item.status.pending)).sort(byDue);
+      const paid = pick((item) => item.status.key === "paid").sort((a, b) => new Date(b.paid_at) - new Date(a.paid_at));
+      const none = pick((item) => item.status.key === "void" || item.status.key === "refunded");
+      const sum = (list) => list.reduce((total, invoice) => total + Number(invoice.amount_cents), 0);
+      const collected = paid.reduce((total, invoice) => total + Number(invoice.amount_cents) - Number(invoice.refunded_cents), 0);
+      const part = (id, heading, note, list) => (list.length ? `<section class="app-section fee-part" id="${id}">
+      <h2>${heading}</h2>
+      ${note ? `<p class="form-note">${note}</p>` : ""}
+      <ul class="owner-list">
+          ${list.map((invoice) => invoiceRow(req, invoice, { stripeOn, payLink: fee.payLink })).join("\n          ")}
+      </ul>
+    </section>` : "");
       res.send(adminPage(req, {
         current: "fees",
         title: "Fees",
         heading: "Finder’s fees",
-        intro: "Owed to you now: " + formatDollars(owed) + ". Collected so far: " + formatDollars(paid) + ".",
+        intro: "Owed to you now: " + formatDollars(sum(late) + sum(waiting)) + ". Collected so far: " + formatDollars(collected) + "." + (late.length ? " Overdue: " + formatDollars(sum(late)) + "." : ""),
         body: `    <p class="form-note owner-lead">Your fee is ${esc(ruleText(fee, "the quoted price"))}, owed only when a customer chooses the company. <a class="plain-link" href="/admin/fees/settings">Fee settings</a></p>
-    ${fee.payLink ? "" : '<p class="owner-next needs-you">You haven&rsquo;t added a payment link yet. <a class="plain-link" href="/admin/fees/settings">Add it in Fee settings</a> and each bill will carry it.</p>'}
-    ${rows ? `<ul class="owner-list">
-${rows}
-    </ul>` : '<p class="owner-empty">No jobs have been awarded yet. A job shows up here when a customer chooses a company, with a bill ready to send.</p>'}`
+    <p class="owner-actions owner-sheet-links"><a class="secondary" href="/admin/fees/books">Books and month-end files</a></p>
+    ${stripeOn || fee.payLink ? "" : '<p class="owner-next needs-you">Companies can&rsquo;t pay online yet. <a class="plain-link" href="/admin/fees/settings#stripe">Connect Stripe or add a payment link in Fee settings</a>. Until then, send each invoice and mark it paid when the money reaches you.</p>'}
+    ${all.length ? "" : '<p class="owner-empty">No invoices yet. One is made the moment a customer chooses a company, numbered and ready to send.</p>'}
+    ${part("overdue", "Overdue", "Past their due day. Each has a reminder ready to send.", late)}
+    ${part("waiting", "Waiting to be paid", "", waiting)}
+    ${part("paid", "Paid", "", paid)}
+    ${part("no-fee", "No fee", "Waived, cancelled, or refunded. They stay here so every invoice number is accounted for.", none)}`
       }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Books: what was billed and what came in, month by month, with an Excel file for each.
+  const STATUS_WORDS = { paid: "Paid", refunded: "Refunded", void: "No fee" };
+  const statusWords = (invoice) => {
+    const status = statusOf(invoice);
+    if (status.key !== "open") return STATUS_WORDS[status.key];
+    return status.pending ? "Bank payment on its way" : status.overdue ? "Overdue" : "Open";
+  };
+
+  router.get("/fees/books", async (req, res, next) => {
+    try {
+      await invoices.issueMissing(pool, config);
+      const all = await invoices.loadInvoices(pool);
+      const months = invoices.monthsOf(all);
+      const years = [...new Set(months.map((month) => month.slice(0, 4)))];
+      const today = invoices.booksFor(all, "").totals;
+      const line = (period) => {
+        const { totals, issued } = invoices.booksFor(all, period);
+        const name = invoices.periodName(period);
+        return `<li class="owner-row fee-row">
+            <p class="owner-row-main">${esc(name)}</p>
+            <p class="owner-row-facts">Billed ${esc(formatDollars(totals.billed))} on ${plural(issued.length, "invoice", "invoices")}<br>Collected ${esc(formatDollars(totals.collected))}${totals.refunded ? ", refunded " + esc(formatDollars(totals.refunded)) : ""}${totals.fees ? ", payment service kept " + esc(money(totals.fees)) : ""}</p>
+            <p class="owner-row-state"><strong class="fee-amount">${esc(money(totals.net))}</strong> <span>reached you</span></p>
+            <p class="owner-actions"><a class="secondary" href="/admin/fees/books.xlsx?period=${esc(period)}" aria-label="Download ${esc(name)} for Excel">Download for Excel</a></p>
+          </li>`;
+      };
+      res.send(adminPage(req, {
+        current: "fees",
+        back: { href: "/admin/fees", label: "Back to fees" },
+        title: "Books",
+        heading: "Books",
+        intro: "Owed to you today: " + formatDollars(today.owedNow) + (today.overdueNow ? ", with " + formatDollars(today.overdueNow) + " overdue" : "") + ".",
+        body: months.length ? `    <p class="form-note owner-lead">Each file has three sheets: a summary, every payment and refund with what the payment service kept, and every invoice. Money counts in the month it moved. Hand the file to whoever does your taxes, or bring it into your bookkeeping app.</p>
+    <p class="owner-actions owner-sheet-links">${years.map((year) => `<a class="secondary" href="/admin/fees/books.xlsx?period=${esc(year)}">Download all of ${esc(year)}</a>`).join(" ")} <a class="secondary" href="/admin/fees/books.xlsx">Download everything</a></p>
+    <ul class="owner-list">
+          ${months.map(line).join("\n          ")}
+    </ul>` : '    <p class="owner-empty">Nothing to show yet. Your books start with your first invoice, which is made when a customer chooses a company.</p>'
+      }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/fees/books.xlsx", async (req, res, next) => {
+    try {
+      const period = invoices.validPeriod(req.query.period);
+      const all = await invoices.loadInvoices(pool);
+      const { totals, moves, issued } = invoices.booksFor(all, period);
+      const file = workbook([
+        {
+          name: "Summary",
+          columns: [{ header: "Item", width: 34 }, { header: "Amount", type: "money", width: 16 }, { header: "Note", width: 70 }],
+          rows: [
+            ["Period", null, invoices.periodName(period)],
+            ["Invoices billed", totals.billed, plural(issued.length, "invoice", "invoices") + " issued in the period"],
+            ["Of those, no fee owed", totals.cancelled, "Waived or cancelled, as things stand today"],
+            ["Payments received", totals.collected, "Counted on the day each was paid"],
+            ["Refunds", -totals.refunded, "Counted on the day each went back"],
+            ["Kept by the payment service", -totals.fees, totals.feesUnknown ? plural(totals.feesUnknown, "payment doesn’t", "payments don’t") + " have a processing fee on file, so this may be low" : "Zelle, checks and cash have none"],
+            ["Reached you", totals.net, "Payments, less refunds, less what the payment service kept"],
+            ["Still owed to you today", totals.owedNow, "Every unpaid invoice on the day of this download, whatever the period"],
+            ["Of that, overdue", totals.overdueNow, ""]
+          ]
+        },
+        {
+          name: "Money in",
+          columns: [
+            { header: "Date", type: "date", width: 14 }, { header: "Invoice", width: 11 }, { header: "What", width: 10 }, { header: "Company", width: 28 },
+            { header: "Job", width: 8 }, { header: "Service", width: 22 }, { header: "Paid by", width: 22 }, { header: "Amount", type: "money", width: 13 },
+            { header: "Payment service kept", type: "money", width: 21 }, { header: "Reached you", type: "money", width: 13 }, { header: "Stripe payment", width: 30 }
+          ],
+          rows: moves.map((move) => [
+            move.on, invoiceRef(move.invoice), move.kind, move.invoice.company, move.invoice.job_ref, move.invoice.service,
+            move.kind === "Payment" ? move.invoice.paid_how : "", move.amount, move.fee, move.net, move.invoice.stripe_payment_intent
+          ])
+        },
+        {
+          name: "Invoices",
+          columns: [
+            { header: "Invoice", width: 11 }, { header: "Issued", type: "date", width: 14 }, { header: "Due", type: "date", width: 14 }, { header: "Company", width: 28 },
+            { header: "Job", width: 8 }, { header: "Service", width: 22 }, { header: "Tier", width: 12 }, { header: "Quoted price", type: "money", width: 14 },
+            { header: "Fee %", type: "number", width: 8 }, { header: "Fee", type: "money", width: 12 }, { header: "Status", width: 24 },
+            { header: "Paid on", type: "date", width: 14 }, { header: "Paid by", width: 22 }, { header: "Refunded", type: "money", width: 12 },
+            { header: "Refunded on", type: "date", width: 14 }, { header: "Cancelled on", type: "date", width: 14 }, { header: "Why", width: 34 }
+          ],
+          rows: issued.slice().sort((a, b) => a.number - b.number).map((invoice) => [
+            invoiceRef(invoice), invoice.issued_at, invoice.due_at, invoice.company, invoice.job_ref, invoice.service, invoice.tier, invoice.quoted_cents,
+            Number(invoice.fee_percent), invoice.amount_cents, statusWords(invoice),
+            invoice.paid_at, invoice.paid_how, Number(invoice.refunded_cents) || null, invoice.refunded_at,
+            invoice.paid_at ? null : invoice.voided_at, invoice.paid_at ? "" : invoice.void_reason
+          ])
+        }
+      ]);
+      const stamp = period || "all-" + new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+      res.set({
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="AT-Legacy-books-${stamp}.xlsx"`
+      });
+      res.send(file);
     } catch (error) {
       next(error);
     }
@@ -1751,12 +1964,12 @@ ${rows}
     }));
   });
 
-  // One won job's fee: paid, or waived (the job fell through, or the owner chose not to charge).
+  // The owner's switches on one invoice: paid, and no fee. See settle() in server/lib/invoices.js.
   router.post("/fees/:id", async (req, res, next) => {
     try {
-      const waived = Boolean(req.body.waived);
-      await pool.query("update quotes set fee_paid = $1, fee_waived = $2 where id = $3", [Boolean(req.body.paid) && !waived, waived, Number(req.params.id) || 0]);
-      res.redirect(303, "/admin/fees");
+      const invoice = await invoices.loadInvoice(pool, req.params.id);
+      if (invoice) await invoices.settle(pool, invoice, { paid: Boolean(req.body.paid), noFee: Boolean(req.body.waived), how: String(req.body.how || "") });
+      res.redirect(303, "/admin/fees" + (invoice ? "#invoice-" + invoice.number : ""));
     } catch (error) {
       next(error);
     }

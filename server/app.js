@@ -7,6 +7,7 @@ const business = require("./lib/business");
 const { DEFAULT_STANDARD, shownStandard, fillStandardPage } = require("./lib/standard");
 const { defaultFee, shownFee, fillFeePage } = require("./lib/fees");
 const { createNotifier } = require("./lib/notify");
+const { createPayments } = require("./lib/payments");
 
 const SITE_DIR = path.join(__dirname, "..", "site");
 // The files a dashboard page loads: styles, the copy-button script, the icon, and fonts.
@@ -31,6 +32,8 @@ function readConfig(env) {
     hostSignin: env.DASHBOARD_ONLY === "1" && env.ADMIN_SIGNIN === "host" && dashboardUrl.startsWith("https://"),
     // Other addresses whose pages may call the request API, such as a static copy of the public pages.
     siteOrigins: new Set((env.SITE_ORIGINS || "").split(",").map((origin) => origin.trim().replace(/\/+$/, "")).filter(Boolean)),
+    // Online payment of invoices. Only the public side uses it. See server/lib/payments.js.
+    stripeKey: (env.STRIPE_SECRET_KEY || "").trim(),
     resendKey: env.RESEND_API_KEY || "",
     notifyFrom: env.NOTIFY_FROM || "",
     notifyTo: env.NOTIFY_TO || ""
@@ -40,7 +43,10 @@ function readConfig(env) {
 function createApp({ pool, secret, config, fetchImpl = fetch }) {
   const app = express();
   const notify = createNotifier({ apiKey: config.resendKey, from: config.notifyFrom, to: config.notifyTo, fetchImpl });
-  const shared = { pool, secret, config, fetchImpl, notify };
+  const payments = createPayments({ pool, config, fetchImpl, notify });
+  const shared = { pool, secret, config, fetchImpl, notify, payments };
+  // server/index.js starts the once-a-minute check from here.
+  app.locals.payments = payments;
 
   app.disable("x-powered-by");
   // One proxy (the host's edge) sits in front of the app.
@@ -111,6 +117,7 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
     });
     app.use("/api", require("./routes/public")(shared));
     app.use("/r", privatePage, require("./routes/customer")(shared));
+    app.use("/q/invoice", privatePage, require("./routes/invoice")(shared));
     app.use("/q", privatePage, require("./routes/partner")(shared));
     if (config.dashboardUrl) {
       // The dashboard runs as its own service. Send the owner there.

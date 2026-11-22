@@ -2,14 +2,16 @@
 // Share buttons: <button data-share-url data-share-text>. Shown only where the phone or browser can share.
 // Send tracking: inside an element with data-track, a click on anything with data-track-event is reported
 // to the dashboard, so it can show when each private link was copied, texted, emailed, or shared.
+// An invoice on the Fees page is tracked the same way, with data-track-invoice.
 // Print buttons: <button data-print> opens the print dialog, where the page can also be saved as a PDF.
 
 function reportSend(element, how) {
-  var row = element.closest("[data-track]");
+  var row = element.closest("[data-track], [data-track-invoice]");
   if (!row || !navigator.sendBeacon) return;
   var data = new URLSearchParams();
   data.set("csrf", row.getAttribute("data-csrf") || "");
-  data.set("request", row.getAttribute("data-track"));
+  data.set("request", row.getAttribute("data-track") || "");
+  data.set("invoice", row.getAttribute("data-track-invoice") || "");
   data.set("quote", row.getAttribute("data-track-quote") || "");
   data.set("event", how);
   navigator.sendBeacon("/admin/link-events", data);

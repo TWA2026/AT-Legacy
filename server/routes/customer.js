@@ -4,7 +4,7 @@ const { formatDollars } = require("../lib/validate");
 const { requestRef, customerPath, isOwnerPreview, recordOpen } = require("../lib/links");
 const { LIMITS, listFiles, loadFile, sendFile, galleryHtml, pickerHtml } = require("../lib/files");
 const record = require("../lib/record");
-const { feeCents } = require("../lib/fees");
+const { invoiceRef, money, invoiceForQuote } = require("../lib/invoices");
 
 const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the customer&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
@@ -201,7 +201,7 @@ function tierCard(request, tier) {
       </li>`;
 }
 
-module.exports = function customerRoutes({ pool, notify = async () => false }) {
+module.exports = function customerRoutes({ pool, config, notify = async () => false }) {
   const router = express.Router();
 
   // The name after the secret is only a label for people. The page opens with or without it.
@@ -319,9 +319,10 @@ ${filesSection(request, files)}`
       const quote = request.quotes.find((item) => String(item.id) === String(req.body.quote));
       if (quote && quote.status === "submitted" && request.status !== "chosen" && request.status !== "closed") {
         await pool.query("update requests set status = 'chosen', chosen_quote_id = $1, chosen_at = now() where id = $2", [quote.id, request.id]);
-        const fee = feeCents(quote);
+        // A company that owes a fee gets its invoice now. Our own crew owes none.
+        const invoice = Number(quote.fee_percent) > 0 ? await invoiceForQuote(pool, config, quote.id) : null;
         notify("A customer chose " + quote.company, requestRef(request.id) + ": the customer chose " + quote.company + " (" + quote.tier + "). Their contact details are now on that company's page." +
-          (fee ? " Fee to bill: " + formatDollars(fee) + ". The bill is ready under Fees in your dashboard." : ""));
+          (invoice ? " Invoice " + invoiceRef(invoice) + " for " + money(invoice.amount_cents) + " is ready to send under Fees in your dashboard." : ""));
       }
       res.redirect(303, customerPath(request));
     } catch (error) {

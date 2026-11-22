@@ -16,6 +16,9 @@ version: 1
 # what deploys. A change here needs the same change there. Custom domains and
 # the address settings (PUBLIC_URL, DASHBOARD_URL, SITE_ORIGINS) are also set
 # in Slipway. See "Deploy on Slipway" in README.md.
+#
+# Secrets are never written here. STRIPE_SECRET_KEY, which turns on online
+# payment of invoices, is added in Slipway as a secret on the hub service.
 
 services:
   - name: at-legacy
