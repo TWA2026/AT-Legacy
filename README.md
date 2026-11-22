@@ -55,10 +55,11 @@ The company's page, `/q/invoice/<token>`, is the invoice while the fee is owed a
 | Permission | Level | What it is for |
 | --- | --- | --- |
 | Checkout Sessions | Write | Making the payment page and reading how it ended |
+| Payment Intents | Read | Following a payment: noticing a bank payment that fails, and reaching the two below |
 | Charges and Refunds | Read | Whether it was a card or a bank payment, and noticing a refund made in Stripe |
 | Balance | Read | What Stripe kept from each payment, for the books |
 
-The last two are optional: without them a payment is still marked paid. The key is read from the environment only. It is never written to the database, a page, or a log, and the dashboard service never uses it. Fee settings shows what the hub last reported: connected or not, test or live, what the key may do, and the last problem in plain words.
+Only the first is required: without the others a payment is still marked paid. A key counts as working once it has made a payment page, so the first time the hub meets a key it makes one page named "Connection check from AT Legacy Services (not a payment)", closes it at once, and gives its address to no one. That is also how an account that Stripe hasn't cleared to take payments is caught before a company tries to pay. The key is read from the environment only. It is never written to the database, a page, or a log, and the dashboard service never uses it. Fee settings shows what the hub last reported: connected or not, test or live, what the key may do, and the last problem in plain words.
 
 No address has to be registered with Stripe. The hub asks Stripe how each payment page ended: when the company comes back from paying, and once a minute for every invoice with a payment page out (`server/lib/payments.js`, started in `server/index.js`). A bank payment takes a few business days, so the invoice says it is on its way until the money lands. A payment for any amount other than the invoice's is never accepted as payment of it. A payment page is closed once its invoice is marked paid by hand or marked no fee, so the same invoice can't be paid twice. A card or bank number never reaches this app.
 

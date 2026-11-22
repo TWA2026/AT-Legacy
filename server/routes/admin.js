@@ -346,6 +346,9 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl, payment
       if (waiting) todo.push(`<li><a href="/admin/partners">${plural(waiting, "company needs", "companies need")} a check or a visit</a></li>`);
       if (owed > 0) todo.push(`<li><a href="/admin/fees">${esc(formatDollars(owed))} in finder’s fees to collect</a></li>`);
       if (late) todo.push(`<li><a href="/admin/fees#overdue">${plural(late, "invoice is", "invoices are")} overdue</a></li>`);
+      // Online payment that was set up and isn't working is something only the owner can put right.
+      const stripe = await payments.readStatus();
+      if (stripe && (stripe.problem || stripe.lastCheckoutProblem)) todo.push('<li><a href="/admin/fees/settings#stripe">Online payment through Stripe needs a look</a></li>');
       if (toCheck.length) {
         const count = toCheck.reduce((sum, row) => sum + row.files, 0);
         todo.push(`<li><a href="/admin/requests/${toCheck[0].request_id}#files">${plural(count, "document", "documents")} to check before any company sees ${count === 1 ? "it" : "them"}</a></li>`);
@@ -1428,16 +1431,26 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
   function stripeSection(status) {
     const checked = status && status.checkedAt ? `<p class="form-note">Last checked ${esc(formatDateTime(status.checkedAt))}.</p>` : "";
     if (status && status.on && status.ok) {
-      const can = (state, ready) => (state === "ok" ? `<li>${ready}: ready</li>` : `<li>${ready}: not yet. ${esc(state || "Not checked yet.")}</li>`);
+      // The three extras, by the name each has on Stripe's key page. One is off when it was tried and the answer wasn't a yes.
+      const names = { intents: "Payment Intents", charges: "Charges and Refunds", balance: "Balance" };
+      const off = Object.keys(names).filter((part) => status[part] !== undefined && status[part] !== "ok");
+      const denied = off.filter((part) => /isn’t allowed/.test(status[part]));
+      const other = [...new Set(off.filter((part) => !denied.includes(part)).map((part) => status[part] || "Not checked yet."))];
+      const words = (items) => (items.length < 3 ? items.join(" and ") : items.slice(0, -1).join(", ") + ", and " + items[items.length - 1]);
+      // Each line needs every permission named after it.
+      const line = (label, ...needs) => `<li>${label}: ${needs.some((part) => off.includes(part)) ? "not yet" : "ready"}</li>`;
       return `<section class="app-section owner-after" id="stripe">
       <h2>Online payment</h2>
       <p class="owner-next"><strong>Stripe is connected${status.mode === "test" ? " in test mode" : ""}.</strong> A company pays the exact amount from its invoice, and the invoice marks itself paid here within a minute or two.</p>
       ${status.mode === "test" ? '<p class="form-error">This is a test key, so no real money moves. Swap it for the live key in Slipway when you are ready to be paid.</p>' : ""}
       <ul class="scope">
         <li>Payment pages for the exact amount: ready</li>
-        ${can(status.charges, "Card or bank on each payment, and refunds you make in Stripe")}
-        ${can(status.balance, "What Stripe kept, for your books")}
+        ${line("A bank payment that doesn&rsquo;t go through, noticed here", "intents")}
+        ${line("Card or bank on each payment, and refunds you make in Stripe", "intents", "charges")}
+        ${line("What Stripe kept, for your books", "intents", "charges", "balance")}
       </ul>
+      ${denied.length ? `<p class="form-error">To switch on the rest: in Stripe, edit the key and set ${words(denied.map((part) => "<strong>" + names[part] + "</strong>"))} to Read. This page catches up within ten minutes.</p>` : ""}
+      ${other.map((problem) => `<p class="form-error">${esc(problem)}</p>`).join("\n      ")}
       ${status.lastCheckoutProblem ? `<p class="form-error">The last payment page couldn&rsquo;t be made. ${esc(status.lastCheckoutProblem)}</p>` : ""}
       ${status.lastPaidAt ? `<p class="form-note">Last payment reported by Stripe: ${esc(formatDateTime(status.lastPaidAt))}.</p>` : ""}
       ${checked}
@@ -1451,10 +1464,11 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
       ${problem}
       <p class="form-note">With Stripe connected, a company pays the exact amount from its invoice and the invoice marks itself paid. To connect it:</p>
       <ol class="scope">
-        <li>In Stripe, open API keys and create a restricted key. Set Checkout Sessions to Write. Set Charges and Refunds, and Balance, to Read.</li>
+        <li>In Stripe, open API keys and create a restricted key. Set Checkout Sessions to Write. Set Payment Intents, Charges and Refunds, and Balance to Read.</li>
         <li>In Slipway, open the hub service, then Environment. Add a secret named STRIPE_SECRET_KEY with the key as its value, then save and deploy.</li>
-        <li>Come back to this page a minute later. It will say Stripe is connected.</li>
+        <li>Come back to this page a few minutes later. It will say Stripe is connected.</li>
       </ol>
+      <p class="form-note">The first time the site meets a key, it makes one test payment page in Stripe and closes it straight away. That is how it knows the key works. No money moves, and nobody is sent that page.</p>
       ${checked}
     </section>`;
   }
@@ -1574,7 +1588,11 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
         : status.overdue ? "Overdue by " + plural(status.daysLate, "day", "days") : "Due by " + formatDate(invoice.due_at);
       state = `<strong class="fee-amount">${esc(amount)}</strong> <span>${esc(when)}</span>`;
       if (status.pending) {
-        note = `<p class="link-note">The company paid from its bank on Stripe. That takes a few business days, and this invoice marks itself paid when the money arrives. <a class="plain-link" href="${esc(link)}?owner=1" target="_blank" rel="noopener">Open the invoice</a></p>`;
+        // A bank payment settles within days. One that still shows as on its way after ten is worth a look in Stripe.
+        const days = Math.floor((Date.now() - new Date(invoice.pending_since).getTime()) / 86400000);
+        note = days >= 10
+          ? `<p class="link-note needs-you">This bank payment has been on its way for ${days} days, which is longer than one should take. Look at it in Stripe. <a class="plain-link" href="/admin/fees/settings#stripe">Fee settings</a> says whether this site can follow bank payments. <a class="plain-link" href="${esc(link)}?owner=1" target="_blank" rel="noopener">Open the invoice</a></p>`
+          : `<p class="link-note">The company paid from its bank on Stripe. That takes a few business days, and this invoice marks itself paid when the money arrives. <a class="plain-link" href="${esc(link)}?owner=1" target="_blank" rel="noopener">Open the invoice</a></p>`;
       } else {
         if (invoice.payment_note) note = `<p class="link-note needs-you">${esc(invoice.payment_note)}</p>`;
         block = sendBlock(invoice, link, status.overdue ? "reminder" : "bill");
@@ -1608,7 +1626,7 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
               ${block}
               ${form}
             </details>`;
-    return `<li class="owner-row fee-row${open && !status.pending ? " needs-you" : ""}" id="invoice-${Number(invoice.number)}">
+    return `<li class="owner-row fee-row${open && (!status.pending || note.includes("needs-you")) ? " needs-you" : ""}" id="invoice-${Number(invoice.number)}">
             ${title}
             <p class="owner-row-facts">${esc(invoice.job_ref)}, ${esc(invoice.company)}<br>${esc(invoices.working(invoice))}. Issued ${esc(formatDate(invoice.issued_at))}.</p>
             <p class="owner-row-state">${state}</p>

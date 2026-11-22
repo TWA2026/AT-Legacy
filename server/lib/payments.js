@@ -10,9 +10,13 @@
 //
 // A restricted key (rk_...) is enough, with these permissions:
 //   Checkout Sessions: Write     to make the payment page and read how it ended
+//   Payment Intents: Read        to follow a payment: a bank payment that fails, and the two below
 //   Charges and Refunds: Read    for card or bank, and to notice a refund made in Stripe
 //   Balance: Read                for what Stripe kept, shown in the books
-// The last two are optional. Without them a payment is still marked paid.
+// Only the first is required. Without the others a payment is still marked paid.
+//
+// A key counts as working once it has made a payment page. So the first time the hub meets a key
+// it makes one page for a made-up amount, closes it at once, and never hands its address to anyone.
 
 const { invoiceRef, money, markPaid, syncQuote } = require("./invoices");
 
@@ -43,8 +47,12 @@ function formFields(value, prefix = "", out = new URLSearchParams()) {
 
 // What the permission is called on Stripe's "Create restricted key" page.
 const PERMISSION_NAMES = {
-  checkout_session: "Checkout Sessions", charge: "Charges and Refunds", balance: "Balance", payment_intent: "Payment Intents"
+  checkout_session: "Checkout Sessions", charge: "Charges and Refunds", balance: "Balance", payment_intent: "Payment Intents",
+  product: "Products", plan: "Prices"
 };
+
+// What the page made to try a key is called in Stripe, so the owner knows what it was if they come across it.
+const CHECK_NAME = "Connection check from AT Legacy Services (not a payment)";
 
 function createPayments({ pool, config, fetchImpl, notify = async () => false }) {
   const key = config.stripeKey || "";
@@ -54,10 +62,14 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
   const mode = wellFormed ? key.split("_")[1] : "";
   const kind = key.startsWith("rk_") ? "restricted" : "standard";
   // What the key has turned out to be allowed to read. Reset by check().
-  const can = { charges: true, balance: true };
+  const can = { intents: true, charges: true, balance: true };
   let running = false;
-  // True once Stripe has accepted the key. Until then no page offers to pay through Stripe.
+  // True once Stripe has accepted the key and made a payment page with it. Until then no page offers to pay through Stripe.
   let accepted = false;
+  // True once this key has made a payment page, so the try isn't repeated at every later check.
+  let proven = false;
+  // Set when Stripe turns down a payment page for an invoice: the key is tried again within the minute.
+  let recheck = false;
   let checkedAt = 0;
 
   async function api(method, path, params) {
@@ -87,7 +99,56 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
         " to " + (level === "write" ? "Write" : "Read") + ".";
     }
     if (problem.status === 401) return "Stripe didn’t accept the key. Check that the whole key was pasted, with nothing before or after it.";
+    if (/cannot currently make live charges/i.test(problem.message)) {
+      return "Stripe says your account can’t take live payments yet. Finish setting up your account in Stripe (your business details and the bank account you are paid into). This page catches up within ten minutes of that.";
+    }
     return problem.message;
+  }
+
+  // The address of the payment page in Stripe's answer. It is at checkout.stripe.com, or at the owner's own address if they set one up in Stripe.
+  function pageAddress(session) {
+    let address;
+    try {
+      address = new URL(session.url);
+    } catch (error) {
+      address = null;
+    }
+    if (!session.id || !address || address.protocol !== "https:") throw new StripeProblem("Stripe’s answer had no payment page in it.");
+    return address.toString();
+  }
+
+  // Makes one payment page the way an invoice's is made, then closes it. Nobody is given its address.
+  // This is what shows that the key may make pages and that the Stripe account can take payments.
+  async function tryPage() {
+    const home = /^https:\/\//.test(config.publicUrl || "") ? config.publicUrl : "https://example.com";
+    let session;
+    try {
+      session = await api("POST", "/v1/checkout/sessions", {
+        mode: "payment",
+        success_url: home,
+        cancel_url: home,
+        // The shortest life Stripe allows is thirty minutes, in case closing it below doesn't go through.
+        expires_at: Math.floor(Date.now() / 1000) + 45 * 60,
+        line_items: [{ quantity: 1, price_data: { currency: "usd", unit_amount: 2500, product_data: { name: CHECK_NAME } } }],
+        metadata: { check: "connection" }
+      });
+    } catch (problem) {
+      return explain(problem);
+    }
+    if (session.id) {
+      try {
+        await api("POST", "/v1/checkout/sessions/" + encodeURIComponent(session.id) + "/expire");
+      } catch (problem) {
+        console.error("Stripe: the connection check’s page could not be closed. It closes by itself within the hour:", problem.message);
+      }
+    }
+    try {
+      pageAddress(session);
+    } catch (problem) {
+      return explain(problem);
+    }
+    proven = true;
+    return "ok";
   }
 
   async function readStatus() {
@@ -111,7 +172,7 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
   // Tries the key and writes down what it can do, for the dashboard's Fee settings page.
   async function check() {
     if (config.dashboardOnly) return null;
-    const status = { on: enabled, mode, kind, checkedAt: new Date().toISOString(), ok: false, problem: "", sessions: "", charges: "", balance: "" };
+    const status = { on: enabled, mode, kind, checkedAt: new Date().toISOString(), ok: false, problem: "", sessions: "", pages: "", intents: "", charges: "", balance: "" };
     if (!key) {
       await saveStatus(status);
       return status;
@@ -133,13 +194,19 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
     };
     status.sessions = await tryRead("/v1/checkout/sessions?limit=1");
     if (status.sessions === "ok") {
+      status.pages = proven ? "ok" : await tryPage();
+      status.intents = await tryRead("/v1/payment_intents?limit=1");
       status.charges = await tryRead("/v1/charges?limit=1");
       status.balance = await tryRead("/v1/balance_transactions?limit=1");
     }
-    status.ok = status.sessions === "ok";
+    status.ok = status.sessions === "ok" && status.pages === "ok";
     accepted = status.ok;
     checkedAt = Date.now();
-    if (!status.ok) status.problem = status.sessions;
+    recheck = false;
+    if (!status.ok) status.problem = status.sessions === "ok" ? status.pages : status.sessions;
+    // A key that has just made a page has nothing left to report from an earlier failure.
+    else status.lastCheckoutProblem = "";
+    can.intents = status.intents === "ok";
     can.charges = status.charges === "ok";
     can.balance = status.balance === "ok";
     await saveStatus(status);
@@ -162,7 +229,7 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
   async function detailsOf(intentId) {
     const out = { intent: intentId || "", charge: "", how: "Stripe", fee: null };
     if (!intentId) return out;
-    const intent = await read("/v1/payment_intents/" + encodeURIComponent(intentId));
+    const intent = await read("/v1/payment_intents/" + encodeURIComponent(intentId), "intents");
     const latest = intent && (intent.latest_charge || (intent.charges && intent.charges.data && intent.charges.data[0]));
     const chargeId = typeof latest === "string" ? latest : latest && latest.id;
     if (!chargeId) return out;
@@ -230,7 +297,7 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
     }
     if (session.status === "complete") {
       // A bank payment: the company has finished Stripe's page, and the money takes a few days.
-      const intent = await read("/v1/payment_intents/" + encodeURIComponent(idOf(session.payment_intent)));
+      const intent = await read("/v1/payment_intents/" + encodeURIComponent(idOf(session.payment_intent)), "intents");
       if (intent && (intent.status === "requires_payment_method" || intent.status === "canceled")) {
         await pool.query(
           `update invoices set pending_since = null, stripe_session_id = '', stripe_session_url = '', stripe_session_expires = null,
@@ -290,34 +357,34 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
         payment_intent_data: { description: "AT Legacy Services invoice " + ref, metadata: { invoice: ref } }
       });
     } catch (problem) {
+      // Stripe said no (a permission taken away, an account on hold). Try the key again before another company runs into it.
+      if (problem.status >= 400 && problem.status < 500) {
+        proven = false;
+        recheck = true;
+      }
       await saveStatus({ lastCheckoutAt: new Date().toISOString(), lastCheckoutProblem: explain(problem) });
       throw problem;
     }
-    let address;
-    try {
-      address = new URL(session.url);
-    } catch (error) {
-      address = null;
-    }
-    // Stripe's page is at checkout.stripe.com, or at the owner's own address if they set one up in Stripe.
-    if (!session.id || !address || address.protocol !== "https:") {
-      throw new StripeProblem("Stripe’s answer had no payment page in it.");
-    }
+    proven = true;
+    recheck = false;
+    const address = pageAddress(session);
     await pool.query(
       "update invoices set stripe_session_id = $2, stripe_session_url = $3, stripe_session_expires = to_timestamp($4), stripe_checked_at = now() where id = $1",
-      [invoice.id, session.id, address.toString(), Number(session.expires_at) || Math.floor(Date.now() / 1000) + 23 * 3600]
+      [invoice.id, session.id, address, Number(session.expires_at) || Math.floor(Date.now() / 1000) + 23 * 3600]
     );
     await saveStatus({ lastCheckoutAt: new Date().toISOString(), lastCheckoutProblem: "" });
-    return address.toString();
+    return address;
   }
 
   // Once a minute on the hub: every invoice with a payment page out, then the slower follow-ups.
-  // The key is tried again every ten minutes while Stripe hasn't accepted it, and four times a day once it has.
+  // The key is tried again every ten minutes while anything is still off, so a permission the owner
+  // switches on in Stripe is picked up without a restart. Once everything works, four times a day.
   async function syncAll() {
     if (!enabled || running) return;
     running = true;
     try {
-      if (Date.now() - checkedAt > (accepted ? 6 * 60 : 10) * 60 * 1000) await check();
+      const settled = accepted && can.intents && can.charges && can.balance;
+      if (recheck || Date.now() - checkedAt > (settled ? 6 * 60 : 10) * 60 * 1000) await check();
       if (!accepted) return;
       const waiting = (await pool.query("select * from invoices where stripe_session_id <> '' and paid_at is null order by id limit 50")).rows;
       for (const invoice of waiting) await syncInvoice(invoice);
@@ -345,7 +412,7 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
       }
       if (!can.charges) return;
       // What Stripe kept isn't always known the moment a payment lands. Look again for up to two weeks.
-      const unpriced = !can.balance ? [] : (await pool.query(
+      const unpriced = !can.intents || !can.balance ? [] : (await pool.query(
         `select * from invoices
           where paid_at is not null and stripe_payment_intent <> '' and processor_fee_cents is null and paid_at > now() - interval '14 days'
             and (stripe_checked_at is null or stripe_checked_at < now() - interval '10 minutes')
@@ -353,7 +420,8 @@ function createPayments({ pool, config, fetchImpl, notify = async () => false })
       )).rows;
       for (const invoice of unpriced) {
         const details = await detailsOf(invoice.stripe_payment_intent);
-        await pool.query("update invoices set processor_fee_cents = $2, paid_how = $3, stripe_charge = $4, stripe_checked_at = now() where id = $1",
+        // A look that learned nothing new never replaces "Card through Stripe" with the plain "Stripe".
+        await pool.query("update invoices set processor_fee_cents = $2, paid_how = case when $3 = 'Stripe' then paid_how else $3 end, stripe_charge = $4, stripe_checked_at = now() where id = $1",
           [invoice.id, details.fee, details.how, details.charge || invoice.stripe_charge]);
       }
       // A refund made in Stripe shows up here within half a day.

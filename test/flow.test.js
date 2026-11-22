@@ -2502,7 +2502,7 @@ test("invoices: an overdue one gets a reminder, an undone choice cancels its inv
 
 // A stand-in for Stripe's API: enough of it to make a payment page and see how it ended.
 function fakeStripe(key) {
-  const stripe = { sessions: new Map(), intents: new Map(), charges: new Map(), entries: new Map(), deny: new Set(), created: [], calls: [], down: false };
+  const stripe = { sessions: new Map(), intents: new Map(), charges: new Map(), entries: new Map(), deny: new Set(), created: [], checks: [], calls: [], down: false, inactive: false };
   const answer = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   const refuse = (permission) => answer(403, { error: { type: "invalid_request_error", message:
     "The provided key '" + key.slice(0, 8) + "********' does not have the required permissions for this endpoint on account 'acct_test'. Having the 'rak_" + permission + "' permission would allow this request to continue." } });
@@ -2518,19 +2518,24 @@ function fakeStripe(key) {
     if (sent !== "Bearer " + key) return answer(401, { error: { type: "invalid_request_error", message: "Invalid API Key provided: " + sent.slice(7, 15) + "****************" } });
     const denied = (permission) => stripe.deny.has(permission);
     if (method === "GET" && path === "/v1/checkout/sessions") return denied("checkout_session_read") ? refuse("checkout_session_read") : answer(200, { object: "list", data: [] });
+    if (method === "GET" && path === "/v1/payment_intents") return denied("payment_intent_read") ? refuse("payment_intent_read") : answer(200, { object: "list", data: [] });
     if (method === "GET" && path === "/v1/charges") return denied("charge_read") ? refuse("charge_read") : answer(200, { object: "list", data: [] });
     if (method === "GET" && path === "/v1/balance_transactions") return denied("balance_read") ? refuse("balance_read") : answer(200, { object: "list", data: [] });
     if (method === "POST" && path === "/v1/checkout/sessions") {
       if (denied("checkout_session_write")) return refuse("checkout_session_write");
+      // An account Stripe hasn't cleared yet may read, and may not make anything that takes a payment.
+      if (stripe.inactive) return answer(400, { error: { type: "invalid_request_error", message: "Your account cannot currently make live charges. If you are a customer trying to make a purchase, please contact the owner of this site. Your transaction has not been processed." } });
       const fields = Object.fromEntries(new URLSearchParams(options.body));
-      const id = "cs_test_" + (stripe.created.length + 1);
+      // The page the hub makes to try a key is kept apart, so an invoice's first page is still cs_test_1.
+      const trying = fields["metadata[check]"] === "connection";
+      const id = trying ? "cs_test_check_" + (stripe.checks.length + 1) : "cs_test_" + (stripe.created.length + 1);
       const session = {
         id, object: "checkout.session", url: "https://checkout.stripe.com/c/pay/" + id, status: "open", payment_status: "unpaid",
         currency: fields["line_items[0][price_data][currency]"], amount_total: Number(fields["line_items[0][price_data][unit_amount]"]),
         payment_intent: null, expires_at: Math.floor(Date.now() / 1000) + 86400, client_reference_id: fields.client_reference_id
       };
       stripe.sessions.set(id, session);
-      stripe.created.push({ id, fields, contentType: options.headers["content-type"] });
+      (trying ? stripe.checks : stripe.created).push({ id, fields, contentType: options.headers["content-type"] });
       return answer(200, session);
     }
     let found = /^\/v1\/checkout\/sessions\/([\w-]+)\/expire$/.exec(path);
@@ -2545,7 +2550,7 @@ function fakeStripe(key) {
     found = /^\/v1\/checkout\/sessions\/([\w-]+)$/.exec(path);
     if (found) return stripe.sessions.has(found[1]) ? answer(200, stripe.sessions.get(found[1])) : missing("checkout.session: " + found[1]);
     found = /^\/v1\/payment_intents\/([\w-]+)$/.exec(path);
-    if (found) return stripe.intents.has(found[1]) ? answer(200, stripe.intents.get(found[1])) : missing("payment_intent: " + found[1]);
+    if (found) return denied("payment_intent_read") ? refuse("payment_intent_read") : stripe.intents.has(found[1]) ? answer(200, stripe.intents.get(found[1])) : missing("payment_intent: " + found[1]);
     found = /^\/v1\/charges\/([\w-]+)$/.exec(path);
     if (found) return denied("charge_read") ? refuse("charge_read") : stripe.charges.has(found[1]) ? answer(200, stripe.charges.get(found[1])) : missing("charge: " + found[1]);
     found = /^\/v1\/balance_transactions\/([\w-]+)$/.exec(path);
@@ -2584,8 +2589,9 @@ test("Stripe: a company pays its invoice's exact amount, and the invoice marks i
   const DATE = "[A-Z][a-z]{2} \\d{1,2}, \\d{4}";
   const company = await addVerifiedPartner(site, admin, "Stripe Fence Co", "Premium");
   const invoiceOf = async (quoteId) => (await pool.query("select * from invoices where quote_id = $1 and current", [quoteId])).rows[0];
-  const win = async (amount) => {
-    const { row } = await createRequest(site, { tiers: ["Premium"] });
+  // `door` is the site the customer's request comes in through. One connection may send ten an hour, so later jobs use a second door.
+  const win = async (amount, door = site) => {
+    const { row } = await createRequest(door, { tiers: ["Premium"] });
     await post("/admin/requests/" + row.id + "/invite", { tier: "Premium", partner: String(company.id) });
     const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
     await site.form("/q/" + quote.token, { action: "submit", amount, timeline: "2 weeks", includes: "All of it" });
@@ -2606,17 +2612,39 @@ test("Stripe: a company pays its invoice's exact amount, and the invoice marks i
   assert.equal(payments.ready(), false);
   assert.match(await (await site.get(first.page)).text(), /We&rsquo;ll send you the payment details with this invoice\./);
   let status = await payments.check();
-  assert.deepEqual([status.on, status.ok, status.mode, status.kind, status.sessions, status.charges, status.balance, status.problem], [true, true, "test", "restricted", "ok", "ok", "ok", ""]);
+  assert.deepEqual([status.on, status.ok, status.mode, status.kind, status.sessions, status.pages, status.intents, status.charges, status.balance, status.problem],
+    [true, true, "test", "restricted", "ok", "ok", "ok", "ok", "ok", ""]);
   assert.equal(payments.ready(), true);
-  assert.ok(stripe.created.length === 0 && !stripe.calls.some((call) => call.startsWith("POST")), "trying the key makes nothing");
+  // Trying a key means making one payment page and closing it at once. It names itself, carries no invoice, and its address is kept nowhere.
+  assert.equal(stripe.checks.length, 1);
+  const tried = stripe.checks[0].fields;
+  assert.ok(Number(tried.expires_at) - Date.now() / 1000 > 30 * 60 && Number(tried.expires_at) - Date.now() / 1000 <= 45 * 60);
+  delete tried.expires_at;
+  assert.deepEqual(tried, {
+    mode: "payment",
+    success_url: "https://example.test",
+    cancel_url: "https://example.test",
+    "line_items[0][quantity]": "1",
+    "line_items[0][price_data][currency]": "usd",
+    "line_items[0][price_data][unit_amount]": "2500",
+    "line_items[0][price_data][product_data][name]": "Connection check from AT Legacy Services (not a payment)",
+    "metadata[check]": "connection"
+  });
+  assert.equal(stripe.sessions.get("cs_test_check_1").status, "expired");
+  assert.deepEqual(stripe.calls.filter((call) => call.startsWith("POST")), ["POST /v1/checkout/sessions", "POST /v1/checkout/sessions/cs_test_check_1/expire"]);
+  assert.equal(stripe.created.length, 0);
+  assert.equal(Number((await pool.query("select count(*)::int as n from invoices where stripe_session_id like 'cs_test_check%' or stripe_session_url like '%cs_test_check%'")).rows[0].n), 0);
+  // A key that has made a page isn't made to prove it again at every later look.
+  await payments.check();
+  assert.equal(stripe.checks.length, 1);
   let settings = await see("/admin/fees/settings");
   assert.match(settings, /<strong>Stripe is connected in test mode\.<\/strong> A company pays the exact amount from its invoice/);
   assert.match(settings, /This is a test key, so no real money moves\./);
-  assert.match(settings, /<li>Payment pages for the exact amount: ready<\/li>\s*<li>Card or bank on each payment, and refunds you make in Stripe: ready<\/li>\s*<li>What Stripe kept, for your books: ready<\/li>/);
+  assert.match(settings, /<li>Payment pages for the exact amount: ready<\/li>\s*<li>A bank payment that doesn&rsquo;t go through, noticed here: ready<\/li>\s*<li>Card or bank on each payment, and refunds you make in Stripe: ready<\/li>\s*<li>What Stripe kept, for your books: ready<\/li>/);
   assert.match(settings, /Not needed while Stripe is connected: each invoice has its own Pay button\./);
   // The key is never written where a page or the database could show it.
   const stored = (await pool.query("select value from settings where key = 'stripe_status'")).rows[0].value;
-  assert.ok(!stored.includes("A1b2C3") && !settings.includes("A1b2C3") && !stored.includes("rk_test"));
+  assert.ok(!stored.includes("A1b2C3") && !settings.includes("A1b2C3") && !stored.includes("rk_test") && !stored.includes("cs_test_check") && !stored.includes("checkout.stripe.com"));
   assert.doesNotMatch(await see("/admin/fees"), /Companies can&rsquo;t pay online yet/);
 
   // The invoice now has a Pay button for its exact amount. It leads to a page Stripe makes for this invoice alone.
@@ -2756,8 +2784,11 @@ test("Stripe: a company pays its invoice's exact amount, and the invoice marks i
   assert.equal(status.charges, "The key isn’t allowed to do this yet. In Stripe, edit the key and set Charges and Refunds to Read.");
   assert.equal(status.balance, "The key isn’t allowed to do this yet. In Stripe, edit the key and set Balance to Read.");
   settings = await see("/admin/fees/settings");
-  assert.match(settings, /Card or bank on each payment, and refunds you make in Stripe: not yet\. The key isn’t allowed to do this yet\. In Stripe, edit the key and set Charges and Refunds to Read\./);
-  assert.match(settings, /What Stripe kept, for your books: not yet\. .* set Balance to Read\./);
+  assert.match(settings, /<strong>Stripe is connected in test mode\.<\/strong>/);
+  assert.ok(settings.includes("<li>A bank payment that doesn&rsquo;t go through, noticed here: ready</li>"));
+  assert.ok(settings.includes("<li>Card or bank on each payment, and refunds you make in Stripe: not yet</li>"));
+  assert.ok(settings.includes("<li>What Stripe kept, for your books: not yet</li>"));
+  assert.ok(settings.includes('<p class="form-error">To switch on the rest: in Stripe, edit the key and set <strong>Charges and Refunds</strong> and <strong>Balance</strong> to Read. This page catches up within ten minutes.</p>'));
   const plain = await win("3000");
   await pay(plain);
   stripe.pay("cs_test_7", { fee: 465 });
@@ -2821,6 +2852,89 @@ test("Stripe: a company pays its invoice's exact amount, and the invoice marks i
   stripe.sessions.delete("cs_test_12");
   await payments.syncAll();
   assert.equal((await now(moved)).stripe_session_id, "");
+
+  // A key that can't follow a payment (Payment Intents) still marks a card payment paid. What it can't see is a bank payment failing.
+  stripe.deny.add("payment_intent_read");
+  status = await payments.check();
+  assert.deepEqual([status.ok, status.intents], [true, "The key isn’t allowed to do this yet. In Stripe, edit the key and set Payment Intents to Read."]);
+  settings = await see("/admin/fees/settings");
+  for (const label of ["A bank payment that doesn&rsquo;t go through, noticed here", "Card or bank on each payment, and refunds you make in Stripe", "What Stripe kept, for your books"]) {
+    assert.ok(settings.includes("<li>" + label + ": not yet</li>"), label);
+  }
+  assert.ok(settings.includes("in Stripe, edit the key and set <strong>Payment Intents</strong> to Read. This page catches up within ten minutes.</p>"));
+  const door = await start();
+  const blind = await win("3000", door);
+  assert.equal(await pay(blind), "https://checkout.stripe.com/c/pay/cs_test_13");
+  stripe.pay("cs_test_13", { fee: 465 });
+  let asked = stripe.calls.length;
+  await payments.syncAll();
+  assert.deepEqual([Boolean((await now(blind)).paid_at), (await now(blind)).paid_how, (await now(blind)).processor_fee_cents, (await now(blind)).stripe_charge], [true, "Stripe", null, ""]);
+  await payments.syncAll();
+  await payments.syncAll();
+  assert.ok(stripe.calls.length - asked <= 2 && !stripe.calls.slice(asked).some((call) => call.includes("/payment_intents/")), "what the key may not read isn't asked for");
+  const stuck = await win("3000", door);
+  assert.equal(await pay(stuck), "https://checkout.stripe.com/c/pay/cs_test_14");
+  stripe.payByBank("cs_test_14");
+  await payments.syncAll();
+  stripe.bankFails("cs_test_14");
+  await payments.syncAll();
+  assert.ok((await now(stuck)).pending_since && !(await now(stuck)).payment_note, "the failure can't be seen without the permission");
+  assert.ok(!row(await see("/admin/fees"), stuck).includes("needs-you"));
+  // So a bank payment still shown as on its way after ten days asks the owner to look.
+  await pool.query("update invoices set pending_since = now() - interval '11 days' where id = $1", [stuck.invoice.id]);
+  fees = await see("/admin/fees");
+  const late = row(fees, stuck);
+  assert.ok(fees.includes('<li class="owner-row fee-row needs-you" id="invoice-' + stuck.invoice.number + '"'));
+  assert.ok(late.includes('<p class="link-note needs-you">This bank payment has been on its way for 11 days, which is longer than one should take. Look at it in Stripe.'));
+  // The owner switches the permission on in Stripe. Within ten minutes the hub tries again by itself, sees the failure, and the invoice can be paid again.
+  stripe.deny.clear();
+  await payments.syncAll();
+  assert.ok((await now(stuck)).pending_since, "not tried again every minute");
+  await payments.check();
+  await payments.syncAll();
+  assert.deepEqual([(await now(stuck)).pending_since, (await now(stuck)).payment_note], [null, "A bank payment was started and did not go through."]);
+  assert.equal(stripe.checks.length, 1, "and the key was not made to prove itself again");
+  assert.doesNotMatch(await see("/admin"), /needs a look/);
+
+  // A key that stops being able to make payment pages (a permission taken away in Stripe) fails one company once.
+  // Within the minute the hub tries the key again, stops offering to pay through Stripe, and tells the owner on the first page they see.
+  stripe.deny.add("checkout_session_write");
+  assert.equal(await pay(stuck), stuck.page + "?pay=off");
+  assert.equal(payments.ready(), true);
+  await payments.syncAll();
+  assert.equal(payments.ready(), false);
+  assert.doesNotMatch(await (await site.get(stuck.page)).text(), /class="invoice-pay"/);
+  assert.match(await see("/admin"), /<li><a href="\/admin\/fees\/settings#stripe">Online payment through Stripe needs a look<\/a><\/li>/);
+  assert.match(await see("/admin/fees/settings"), /<strong>Stripe isn&rsquo;t connected yet\.<\/strong>[\s\S]*<p class="form-error">The key isn’t allowed to do this yet\. In Stripe, edit the key and set Checkout Sessions to Write\.<\/p>/);
+  // Put right in Stripe, it comes back by itself at the next try.
+  stripe.deny.clear();
+  await payments.check();
+  assert.deepEqual([payments.ready(), stripe.checks.length, stripe.sessions.get("cs_test_check_2").status], [true, 2, "expired"]);
+  assert.doesNotMatch(await see("/admin"), /needs a look/);
+  assert.doesNotMatch(await see("/admin/fees/settings"), /couldn&rsquo;t be made/);
+
+  // A key that may read and may not make payment pages (Checkout Sessions set to Read) is not taken as working.
+  stripe.deny.add("checkout_session_write");
+  const readOnly = await start({ STRIPE_SECRET_KEY: key }, stripe.fetch);
+  status = await readOnly.app.locals.payments.check();
+  assert.deepEqual([status.on, status.ok, status.sessions, status.pages, status.problem],
+    [true, false, "ok", "The key isn’t allowed to do this yet. In Stripe, edit the key and set Checkout Sessions to Write.", "The key isn’t allowed to do this yet. In Stripe, edit the key and set Checkout Sessions to Write."]);
+  assert.equal(readOnly.app.locals.payments.ready(), false);
+  assert.match(await (await readOnly.get(moved.page)).text(), /We&rsquo;ll send you the payment details with this invoice\./);
+  settings = await (await readOnly.get("/admin/fees/settings", { cookie: admin.cookie })).text();
+  assert.match(settings, /<strong>Stripe isn&rsquo;t connected yet\.<\/strong>[\s\S]*<p class="form-error">The key isn’t allowed to do this yet\. In Stripe, edit the key and set Checkout Sessions to Write\.<\/p>/);
+  // A Stripe account that isn't cleared to take payments yet: caught here, before any company tries to pay.
+  stripe.deny.clear();
+  stripe.inactive = true;
+  status = await readOnly.app.locals.payments.check();
+  assert.equal(status.ok, false);
+  assert.equal(status.problem, "Stripe says your account can’t take live payments yet. Finish setting up your account in Stripe (your business details and the bank account you are paid into). This page catches up within ten minutes of that.");
+  assert.equal(stripe.checks.length, 2, "a try that Stripe turned down made nothing");
+  // Once the account is cleared, the next try works and the key is taken.
+  stripe.inactive = false;
+  status = await readOnly.app.locals.payments.check();
+  assert.deepEqual([status.ok, status.pages, status.problem, readOnly.app.locals.payments.ready()], [true, "ok", "", true]);
+  assert.deepEqual([stripe.checks.length, stripe.sessions.get("cs_test_check_3").status], [3, "expired"]);
 
   // A wrong key: Stripe says no, nothing offers to pay through it, and the dashboard says what to check.
   const wrong = await start({ STRIPE_SECRET_KEY: ["sk", "test", "Z9y8X7w6V5u4T3s2R1q0"].join("_") }, stripe.fetch);
