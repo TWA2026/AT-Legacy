@@ -68,6 +68,7 @@ async function createRequest(site, overrides = {}) {
 }
 
 const { itemKey, loadStandard } = require("../server/lib/standard");
+const { saveFee } = require("../server/lib/fees");
 
 // Scorecard boxes are named after each item's wording. These tick the ones named, or every one.
 const tick = (...labels) => Object.fromEntries(labels.map((label) => [itemKey(label), "on"]));
@@ -878,7 +879,7 @@ test("full flow: request, invites, quotes, choice, and fee", async () => {
   assert.match(partnerPage, /Budget Fence LLC/);
   assert.match(partnerPage, /34637/);
   assert.doesNotMatch(partnerPage, /Dana Customer|813-555-0100/);
-  assert.match(partnerPage, /5% of the job total/);
+  assert.match(partnerPage, /the finder&rsquo;s fee is 5% of the price you quote, at least \$25 and at most \$750\./);
 
   const bad = await site.form("/q/" + affordable.token, { action: "submit", amount: "cheap", timeline: "2 weeks", includes: "All of it" });
   assert.equal(bad.status, 400);
@@ -918,12 +919,14 @@ test("full flow: request, invites, quotes, choice, and fee", async () => {
   await site.form("/r/" + row.token + "/choose", { quote: String(top.id) });
   assert.equal((await pool.query("select chosen_quote_id from requests where id = $1", [row.id])).rows[0].chosen_quote_id, affordable.id);
 
-  // Fee: 5% of $4,950 is $247.50, then 5% of the $5,200 final total is $260.
+  // Fee: 5% of the quoted $4,950 is $247.50. The choice is dated, so the bill has a due day.
+  assert.ok((await pool.query("select chosen_at from requests where id = $1", [row.id])).rows[0].chosen_at);
   let fees = await (await site.get("/admin/fees", { cookie: admin.cookie })).text();
   assert.match(fees, /Owed to you now: \$247\.50/);
-  await site.form("/admin/fees/" + affordable.id, { csrf: admin.csrf, final: "5200", paid: "on" }, { cookie: admin.cookie });
+  assert.match(fees, /5% of \$4,950 is \$247\.50\. Due by [A-Z][a-z]{2} \d{1,2}, \d{4}\./);
+  await site.form("/admin/fees/" + affordable.id, { csrf: admin.csrf, paid: "on" }, { cookie: admin.cookie });
   fees = await (await site.get("/admin/fees", { cookie: admin.cookie })).text();
-  assert.match(fees, /Owed to you now: \$0\. Collected so far: \$260\./);
+  assert.match(fees, /Owed to you now: \$0\. Collected so far: \$247\.50\./);
 
   // The owner can undo a choice.
   await site.form("/admin/requests/" + row.id + "/status", { csrf: admin.csrf, status: "reopen" }, { cookie: admin.cookie });
@@ -1050,11 +1053,11 @@ test("the dashboard is marked as the owner's, says what needs them, and builds s
   assert.match(home, /Budget &lt;i&gt;Fence&lt;\/i&gt; was chosen/);
   assert.match(home, /<a href="\/admin\/fees">\$247\.50 in finder’s fees to collect<\/a>/);
   detail = await see("/admin/requests/" + row.id);
-  assert.match(detail, /When the job is done, enter the final total under Fees\./);
+  assert.match(detail, /Send the bill from Fees\./);
   const fees = await see("/admin/fees");
   assert.match(fees, /class="owner-row fee-row needs-you"/);
   assert.match(fees, /Owed to you/);
-  await site.form("/admin/fees/" + quotes[0].id, { csrf: admin.csrf, final: "", paid: "on" }, { cookie: admin.cookie });
+  await site.form("/admin/fees/" + quotes[0].id, { csrf: admin.csrf, paid: "on" }, { cookie: admin.cookie });
   assert.doesNotMatch(await see("/admin"), /fees to collect/);
 
   // The Links page lists every fixed page with its full address.
@@ -1563,7 +1566,12 @@ test("business details: one file fills every page, and an empty detail takes its
     assert.doesNotMatch(read("about.html"), /run by AT Legacy Group LLC, a Florida company/);
     assert.match(read("contact.html"), /Reach us directly[\s\S]*813-555-0142<\/a>, Monday to Saturday, 8 to 6[\s\S]*mailto:hello@atlegacyservices\.com/);
     assert.match(read("contact.html"), /We answer within one business day\./);
-    for (const name of fs.readdirSync(path.join(root, "dist")).filter((file) => file.endsWith(".html"))) assert.ok(!/\{\{|<!--\/?if:|<!--\/?standard:/.test(read(name)), name);
+    for (const name of fs.readdirSync(path.join(root, "dist")).filter((file) => file.endsWith(".html"))) assert.ok(!/\{\{|<!--\/?if:|<!--\/?standard:|<!--fee:/.test(read(name)), name);
+    // The same goes for the fee rule on the For companies page and in the Terms.
+    assert.match(built.stdout, /the fee from the rule in the code/);
+    assert.match(read("partners.html"), /<span data-fee="percent">5%<\/span> finder&rsquo;s fee when you&rsquo;re hired/);
+    assert.match(read("terms.html"), /<span data-fee="rule">5% of the price you quote, at least \$25 and at most \$750<\/span>/);
+    assert.match(read("terms.html"), /src="config\.js\?v=[a-f0-9]{10}" defer><\/script>\s*<script src="fee\.js\?v=[a-f0-9]{10}"/);
     // With the hub out of reach, the build writes the standard this code ships with into the page.
     assert.match(built.stdout, /the standard from the list in the code/);
     assert.match(read("standard.html"), /<li>The job site is safe and kept clean<\/li>/);
@@ -2028,6 +2036,7 @@ test("pages that read without JavaScript: the standard is in its page, and nothi
   });
   const before = await loadStandard(pool);
   try {
+    await saveFee(pool, { percent: 4.5, minCents: 2000, maxCents: 0, dueDays: 10, payLink: "https://buy.stripe.com/test_never_public" });
     // (With no items past the basics, the tiers can't ask for points, so both need 0.)
     await saveStandard(pool, { mid: 0, premium: 0, reviewMonths: 6, items: [{ label: "Crew wears eye protection <always>", kind: "must", points: 0 }, ...before.items.filter((item) => item.kind === "must").slice(1)] });
     assert.equal((await (await site.get("/api/standard")).json()).must[0], "Crew wears eye protection <always>");
@@ -2038,11 +2047,183 @@ test("pages that read without JavaScript: the standard is in its page, and nothi
     assert.ok(page.includes("<li>Crew wears eye protection &lt;always&gt;</li>") && !page.includes("The job site is safe and kept clean"));
     assert.ok(page.includes('id="standard-more-card" hidden') && page.includes("every 6 months"));
     assert.match(page, /src="standard\.js\?v=[a-f0-9]{10}"/);
+    // The fee rule is asked for the same way. The owner's payment link is never part of the answer.
+    assert.match(built.stdout, /the fee from the hub/);
+    const companies = fs.readFileSync(path.join(root, "dist", "partners.html"), "utf8");
+    assert.match(companies, /<span data-fee="percent">4\.5%<\/span> finder&rsquo;s fee/);
+    assert.match(companies, /<span data-fee="limits">Never less than \$20 a job\.<\/span>/);
+    assert.match(fs.readFileSync(path.join(root, "dist", "terms.html"), "utf8"), /<span data-fee="rule">4\.5% of the price you quote, at least \$20<\/span>[\s\S]*<span data-fee="days">10<\/span> days/);
+    assert.doesNotMatch(JSON.stringify(await (await site.get("/api/fee")).json()), /stripe|payLink/);
   } finally {
-    await pool.query("delete from settings where key = 'standard'");
+    await pool.query("delete from settings where key in ('standard', 'fee')");
     fs.rmSync(path.join(root, "dist"), { recursive: true, force: true });
   }
   assert.deepEqual(shownStandard(await loadStandard(pool)), shown, "the standard is back as it was for the tests that follow");
+});
+
+test("fees: one rule with a floor and a ceiling, a bill for every won job, and settings the owner can change", async () => {
+  const { feeCents, payUrl, checkFee, DEFAULT_FEE } = require("../server/lib/fees");
+  const priced = (dollars, terms = DEFAULT_FEE) => feeCents({ amount_cents: dollars * 100, fee_percent: terms.percent, fee_min_cents: terms.minCents, fee_max_cents: terms.maxCents });
+  assert.deepEqual([50, 500, 6400, 15000, 70000].map((dollars) => priced(dollars)), [2500, 2500, 32000, 75000, 75000]);
+  assert.equal(priced(70000, { percent: 4, minCents: 0, maxCents: 0 }), 280000);
+  assert.equal(priced(6400, { percent: 0, minCents: 2500, maxCents: 0 }), 0);
+  // A Stripe link carries the job number. Any other link is left as it is. Nothing but https is kept.
+  assert.equal(payUrl("https://buy.stripe.com/test_abc", "R1003-Q7"), "https://buy.stripe.com/test_abc?client_reference_id=R1003-Q7");
+  assert.equal(payUrl("https://square.link/u/abc", "R1003-Q7"), "https://square.link/u/abc");
+  assert.equal(payUrl("https://notstripe.com.example/x", "R1003-Q7"), "https://notstripe.com.example/x");
+  for (const link of ["http://buy.stripe.com/x", "javascript:alert(1)", "https://user:pass@example.test/x", "buy.stripe.com/x"]) {
+    assert.match(checkFee({ percent: "5", days: "14", pay_link: link }).problem, /https/, link);
+  }
+
+  const site = await start();
+  const admin = await login(site);
+  const see = async (path) => (await site.get(path, { cookie: admin.cookie })).text();
+  const post = (path, fields) => site.form(path, { csrf: admin.csrf, ...fields }, { cookie: admin.cookie });
+
+  // The public pages state the rule, and a script keeps it current.
+  const rule = "5% of the price you quote, at least $25 and at most $750";
+  assert.deepEqual(await (await site.get("/api/fee")).json(), { percent: "5%", rule, limits: "Never less than $25 or more than $750 a job.", days: 14 });
+  const companies = await (await site.get("/partners")).text();
+  assert.match(companies, /<strong><span data-fee="percent">5%<\/span> finder&rsquo;s fee when you&rsquo;re hired<\/strong>/);
+  assert.match(companies, /<span data-fee="limits">Never less than \$25 or more than \$750 a job\.<\/span> If a job falls through before work starts, you owe nothing\./);
+  assert.match(companies, /<script src="fee\.js\?v=[0-9a-f]+" defer><\/script>/);
+  const terms = await (await site.get("/terms")).text();
+  assert.match(terms, /The fee is <span data-fee="rule">5% of the price you quote, at least \$25 and at most \$750<\/span>\./);
+  assert.match(terms, /It is due <span data-fee="days">14<\/span> days after that day\./);
+  assert.match(terms, /No fee is owed on work that is paid for by a property insurance claim\./);
+  assert.doesNotMatch(companies + terms, /<!--fee:|5% of the job total/);
+  assert.equal((await site.get("/fee.js")).status, 200);
+
+  // Fee settings belong to the owner.
+  assert.equal((await site.get("/admin/fees/settings")).status, 303);
+  assert.equal((await site.form("/admin/fees/settings", { percent: "1", days: "1" })).status, 303);
+  let settings = await see("/admin/fees/settings");
+  assert.match(settings, /name="percent"[^>]*value="5"/);
+  assert.match(settings, /name="min"[^>]*value="25"/);
+  assert.match(settings, /name="max"[^>]*value="750"/);
+  assert.match(settings, /A pool, quoted at \$70,000: <strong>\$750<\/strong>/);
+  assert.match(settings, /A cleaning visit, quoted at \$120: <strong>\$25<\/strong>/);
+
+  // Earlier tests left jobs of their own on the Fees page, so the sums here are counted from where it stood.
+  const { formatDollars } = require("../server/lib/validate");
+  const totals = async () => {
+    const page = await see("/admin/fees");
+    const [, owed, paid] = /Owed to you now: \$([\d,.]+?)\. Collected so far: \$([\d,.]+?)\.</.exec(page);
+    const cents = (text) => Math.round(Number(text.replace(/,/g, "")) * 100);
+    return { owed: cents(owed), paid: cents(paid), bills: (page.match(/class="link-row bill"/g) || []).length };
+  };
+  const start0 = await totals();
+  const since = async () => {
+    const now = await totals();
+    return { owed: (now.owed - start0.owed) / 100, paid: (now.paid - start0.paid) / 100, bills: now.bills - start0.bills };
+  };
+
+  // One company wins three jobs: a small one, a middle one, and a big one.
+  const company = await addVerifiedPartner(site, admin, "Bill Fence Co", "Affordable");
+  const win = async (amount) => {
+    const { row } = await createRequest(site, { tiers: ["Affordable"] });
+    await post("/admin/requests/" + row.id + "/invite", { tier: "Affordable", partner: String(company.id) });
+    const quote = (await pool.query("select * from quotes where request_id = $1", [row.id])).rows[0];
+    const brief = await (await site.get("/q/" + quote.token)).text();
+    await site.form("/q/" + quote.token, { action: "submit", amount, timeline: "2 weeks", includes: "All of it" });
+    await site.form("/r/" + row.token + "/choose", { quote: String(quote.id) });
+    return { row, quote, brief };
+  };
+  const small = await win("120");
+  const middle = await win("6400");
+  const big = await win("70000");
+  assert.deepEqual([Number(small.quote.fee_percent), small.quote.fee_min_cents, small.quote.fee_max_cents], [5, 2500, 75000]);
+  assert.match(small.brief, /the finder&rsquo;s fee is 5% of the price you quote, at least \$25 and at most \$750\./);
+  // Once it wins, the company's own page says what it owes. With no payment link yet, the bill is to come.
+  let wonPage = await (await site.get("/q/" + small.quote.token)).text();
+  assert.match(wonPage, /<h3>Your finder&rsquo;s fee is \$25<\/h3>/);
+  assert.match(wonPage, /5% of \$120 is \$6, raised to the \$25 minimum\. It is due by [A-Z][a-z]{2} \d{1,2}, \d{4}\./);
+  assert.match(wonPage, /We&rsquo;ll send you the bill\./);
+  assert.doesNotMatch(wonPage, /Pay the fee/);
+
+  // The Fees page: each fee worked out, the total owed, and a nudge to add a payment link.
+  let fees = await see("/admin/fees");
+  assert.deepEqual(await since(), { owed: 1095, paid: 0, bills: 3 });
+  assert.match(fees, /5% of \$120 is \$6, raised to the \$25 minimum\. Due by /);
+  assert.match(fees, /5% of \$6,400 is \$320\. Due by /);
+  assert.match(fees, /5% of \$70,000 is \$3,500, held to the \$750 maximum\. Due by /);
+  assert.match(fees, /You haven&rsquo;t added a payment link yet\./);
+  assert.match(fees, /Add your payment link in <a class="plain-link" href="\/admin\/fees\/settings">Fee settings<\/a>/);
+  assert.doesNotMatch(fees, /Pay here:|Open the payment page|name="final"/);
+  assert.ok((await see("/admin")).includes('<a href="/admin/fees">' + formatDollars((await totals()).owed) + " in finder’s fees to collect</a>"));
+
+  // A bad rule is turned away with the reason, and what was typed stays in the form.
+  for (const [fields, reason] of [
+    [{ percent: "0", days: "14" }, /percentage as a number from 0\.5 to 20/],
+    [{ percent: "25", days: "14" }, /percentage as a number from 0\.5 to 20/],
+    [{ percent: "5", min: "50", max: "40", days: "14" }, /largest fee can’t be less than the smallest/],
+    [{ percent: "5", days: "two weeks" }, /days to pay as a whole number/],
+    [{ percent: "5", days: "14", pay_link: "javascript:alert(1)" }, /starts with https:\/\//]
+  ]) {
+    const refused = await post("/admin/fees/settings", fields);
+    assert.equal(refused.status, 400, JSON.stringify(fields));
+    assert.match(await refused.text(), reason);
+  }
+  assert.equal((await site.form("/admin/fees/settings", { percent: "9", days: "14" }, { cookie: admin.cookie })).status, 403);
+  assert.equal((await (await site.get("/api/fee")).json()).percent, "5%");
+
+  // With a payment link saved, every bill carries it, tagged with the job number and nothing personal.
+  const saved = await post("/admin/fees/settings", { percent: "5", min: "25", max: "750", days: "14", pay_link: "https://buy.stripe.com/test_abc" });
+  assert.equal(saved.status, 303);
+  assert.equal(saved.headers.get("location"), "/admin/fees/settings?saved=1");
+  assert.match(await see("/admin/fees/settings?saved=1"), /<strong>Saved\.<\/strong> Briefs you send from now on carry this rule\./);
+  fees = await see("/admin/fees");
+  const ref = "R" + (1000 + middle.row.id);
+  const payLink = "https://buy.stripe.com/test_abc?client_reference_id=" + ref + "-Q" + middle.quote.id;
+  const bill = new RegExp('data-copy-text="AT Legacy Services: the finder’s fee for job ' + ref + " \\(Fence\\) is \\$320, due by [A-Z][a-z]{2} \\d{1,2}, \\d{4}\\. Pay here: " + payLink.replace(/[.?]/g, "\\$&") + '"');
+  assert.match(fees, bill);
+  assert.match(fees, new RegExp('<a href="' + payLink.replace(/[.?]/g, "\\$&") + '" target="_blank" rel="noopener">Open the payment page</a>'));
+  assert.match(fees, /<a href="sms:8135550199\?&amp;body=AT%20Legacy%20Services%3A%20the%20finder%E2%80%99s%20fee[^"]*client_reference_id[^"]*">Text it to Pat<\/a>/);
+  assert.match(fees, /<a href="mailto:pat@example\.test\?subject=AT%20Legacy%20Services%20fee[^"]*">Email it to Pat<\/a>/);
+  assert.doesNotMatch(fees, /You haven&rsquo;t added a payment link yet/);
+  // What goes out to the company names the job, never the customer.
+  const sent = fees.match(/data-copy-text="[^"]*"|href="(sms|mailto):[^"]*"|href="https:\/\/buy\.stripe\.com[^"]*"/g);
+  assert.ok(sent.length >= 12);
+  for (const piece of sent) assert.doesNotMatch(decodeURIComponent(piece), /Dana|Customer|813-555-0100|8135550100/);
+  wonPage = await (await site.get("/q/" + middle.quote.token)).text();
+  assert.match(wonPage, new RegExp('<a class="primary" href="' + payLink.replace(/[.?]/g, "\\$&") + '" rel="noopener">Pay the fee</a>'));
+
+  // The big job fell through before work started: no fee. The middle one paid.
+  await post("/admin/fees/" + big.quote.id, { waived: "on" });
+  await post("/admin/fees/" + middle.quote.id, { paid: "on" });
+  fees = await see("/admin/fees");
+  assert.deepEqual(await since(), { owed: 25, paid: 320, bills: 1 });
+  assert.match(fees, /<strong class="fee-amount fee-waived">\$750<\/strong> <span>Waived<\/span>/);
+  assert.ok((await see("/admin")).includes(formatDollars((await totals()).owed) + " in finder’s fees to collect"));
+  assert.match(await see("/admin/requests/" + big.row.id), /You waived the fee on this one\./);
+  assert.match(await (await site.get("/q/" + big.quote.token)).text(), /There is no finder&rsquo;s fee on this job\./);
+  assert.match(await (await site.get("/q/" + middle.quote.token)).text(), /Your finder&rsquo;s fee of \$320 is paid\. Thank you\./);
+  // Waived wins over paid, and both can be undone.
+  await post("/admin/fees/" + big.quote.id, { waived: "on", paid: "on" });
+  assert.deepEqual((await pool.query("select fee_paid, fee_waived from quotes where id = $1", [big.quote.id])).rows[0], { fee_paid: false, fee_waived: true });
+  await post("/admin/fees/" + big.quote.id, {});
+  assert.equal((await since()).owed, 775);
+  await post("/admin/fees/" + big.quote.id, { waived: "on" });
+
+  // The Excel file carries the fee as billed and says which were waived.
+  const workbook = unzip(Buffer.from(await (await site.get("/admin/tracker.xlsx", { cookie: admin.cookie })).arrayBuffer()));
+  const everything = Object.values(workbook).join("\n");
+  assert.match(everything, /Waived/);
+
+  // A new rule reaches new briefs only. Jobs already sent keep the terms they were sent with.
+  await post("/admin/fees/settings", { percent: "4", min: "", max: "", days: "7", pay_link: "" });
+  assert.deepEqual(await (await site.get("/api/fee")).json(), { percent: "4%", rule: "4% of the price you quote", limits: "", days: 7 });
+  const later = await win("70000");
+  assert.deepEqual([Number(later.quote.fee_percent), later.quote.fee_min_cents, later.quote.fee_max_cents], [4, 0, 0]);
+  assert.match(later.brief, /the finder&rsquo;s fee is 4% of the price you quote\. You never pay/);
+  fees = await see("/admin/fees");
+  assert.match(fees, /4% of \$70,000 is \$2,800\. Due by /);
+  assert.match(fees, /5% of \$120 is \$6, raised to the \$25 minimum/);
+  assert.deepEqual(await since(), { owed: 2825, paid: 320, bills: 2 });
+  assert.match(fees, /Your fee is 4% of the quoted price, owed only when a customer chooses the company\./);
+
+  // Put the rule back for the tests that follow.
+  await pool.query("delete from settings where key = 'fee'");
 });
 
 test("repairs go to our own crew with no fee", async () => {

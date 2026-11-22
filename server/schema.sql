@@ -124,6 +124,13 @@ create table if not exists messages (
 );
 
 -- More of each quote, so a customer can compare quotes line by line.
+-- The fee terms in force when the brief was sent: the smallest and largest fee, in cents (0 = none).
+alter table quotes add column if not exists fee_min_cents integer not null default 0;
+alter table quotes add column if not exists fee_max_cents integer not null default 0;
+-- The owner can waive a fee: a job that fell through, a first job on the house.
+alter table quotes add column if not exists fee_waived boolean not null default false;
+-- When the customer chose. A fee's due date counts from here.
+alter table requests add column if not exists chosen_at timestamptz;
 alter table quotes add column if not exists start_by text not null default '';
 alter table quotes add column if not exists payment_terms text not null default '';
 alter table quotes add column if not exists excludes text not null default '';

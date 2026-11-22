@@ -2604,12 +2604,13 @@ html {
   }
 
   .fee-row .fee-form {
-    grid-column: 2 / span 2;
+    grid-column: 1 / -1;
     grid-row: auto;
-    grid-template-columns: auto minmax(0, 150px) auto auto;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     max-width: none;
-    gap: 10px 14px;
+    gap: 6px 22px;
   }
 }
 
@@ -3949,4 +3950,67 @@ html {
   .standard-card {
     padding: 30px 28px 32px;
   }
+}
+
+/* Dashboard, Fees: the bill for a won job, ready to copy, text, or email. */
+.fee-row .bill {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 8px;
+  max-width: 640px;
+  margin: 6px 0 4px;
+}
+
+/* The words that go to the company, shown as the message they will get. */
+.bill-text {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 6px;
+  background: var(--shell);
+  overflow-wrap: anywhere;
+}
+
+.bill-link {
+  color: var(--slate);
+}
+
+.bill .link-actions {
+  gap: 0 22px;
+  margin: 0;
+}
+
+.bill .link-actions a,
+.bill .link-actions .text-button,
+.fee-form .choice {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+.fee-waived {
+  color: var(--slate);
+  text-decoration: line-through;
+}
+
+/* The company's page after it wins: what it owes and where to pay. */
+.fee-due {
+  max-width: 640px;
+  margin-top: 22px;
+  padding: 16px 18px 18px;
+  border: 1px solid rgba(19, 40, 58, 0.25);
+  border-left: 4px solid var(--gold);
+  border-radius: 6px;
+  background: var(--white);
+}
+
+.fee-due h3 {
+  margin: 0 0 6px;
+}
+
+.fee-due p {
+  margin: 0;
+}
+
+.fee-due .fee-pay {
+  margin-top: 14px;
 }

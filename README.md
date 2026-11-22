@@ -11,7 +11,7 @@ One Node app serves the public site, the request API, the private customer and p
 3. **Owner** opens the request in `/admin`, picks one approved partner per tier, and gets a private quote link, `/q/<token>`, to send to each partner.
 4. **Partner** opens the link, reads the brief, and enters a price. Partners see the job but not the customer's name or contact details.
 5. **Customer** compares the quotes and chooses one. Only then does the chosen partner's page show the customer's contact details. The customer hires and pays the partner directly.
-6. **Owner** tracks the finder's fee on `/admin/fees`.
+6. **Owner** bills the finder's fee from `/admin/fees`. The fee is a percentage of the quoted price with a smallest and a largest amount (5%, $25, $750 to start), set under Fee settings. Each brief keeps the terms it was sent with.
 
 Repairs and upkeep go to the in-house "AT Legacy Services" partner record as a single quote with no fee.
 
@@ -24,7 +24,7 @@ Dashboard pages share one frame (`ownerPage` in `server/lib/html.js`): a gold "O
 | Requests | What needs the owner, then every request with its next step. Requests that need a company come first |
 | Partners | The approved vendor list, the companies working toward it, the standard, and the sign-up link to send to a new company |
 | Services | A switch for each service, beside how many approved companies it has in each tier. Off takes the service off the website |
-| Fees | One row per awarded job: the fee, the final total, and whether it's paid |
+| Fees | One row per awarded job: the fee and how it was worked out, a bill to copy, text, or email with the owner's payment link, and switches for paid and no fee. Fee settings holds the rule and the payment link |
 | Messages | What people send from the Contact page, newest first, with a tap to call or email back |
 | Links | Every fixed page of the site with its address, and who each one is for |
 
@@ -97,6 +97,7 @@ The Services tab decides which services the website offers. Each row shows the a
 A search engine, an AI assistant, or a browser with JavaScript off reads a page's own HTML, so the pages people judge the business by say what they mean there.
 
 - **Our standard** carries every item in its HTML. The build asks the hub for the owner's current list (`/api/standard`, 4 seconds at most) and writes it into the page; if the hub can't be reached it writes the list this code ships with. The page's script then swaps in the current list for each visitor, so an edit in the dashboard shows at once for them and after the next deploy for everyone else.
+- **For companies** and **Terms** carry the fee rule in their HTML the same way (`/api/fee`), and `fee.js` swaps in the current rule when the page opens. The owner's payment link is never part of that answer; it appears only on a bill and on the page of a company that won a job.
 - **Approved companies** is live by design, so its HTML holds no list, no counts, and no empty headings. Without JavaScript it says so and points to the Contact page.
 - **Price marks** are written as `$`, `$$`, `$$$`. The dimmed signs beside them are drawn by the stylesheet.
 
@@ -165,7 +166,7 @@ Set these on the service's **Environment** tab in Slipway (see `.env.example`).
 | `ADMIN_PASSWORD` | One sign-in method | Single dashboard password, used only when the WorkOS values are not set |
 | `ANTHROPIC_API_KEY` | No | Turns on the AI review |
 | `AI_MODEL` | No | Defaults to `claude-haiku-5-5` |
-| `FEE_PERCENT` | No | Finder's fee on new quote links. Defaults to 5 |
+| `FEE_PERCENT` | No | The starting percentage for the finder's fee, until the owner saves a rule under Fees, then Fee settings. Defaults to 5 |
 | `PUBLIC_URL` | Recommended | The hub's public address, such as `https://atlegacyservices.com`. Used for the sign-in redirect, for links copied from the dashboard, and to keep sign-in cookies HTTPS-only. Defaults to the address you opened the dashboard on |
 | `RESEND_API_KEY`, `NOTIFY_FROM`, `NOTIFY_TO` | No | Emails you when a request, application, message, quote, site-visit request, choice, rating, or document to check arrives. With the first two set, a customer who gave an email also gets their private link by email |
 | `SITE_ORIGINS` | With a static copy | Comma-separated addresses whose pages may send forms to this hub, such as `https://atlegacyservices.com` |

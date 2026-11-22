@@ -7,6 +7,7 @@ const { newToken, sign, safeEqual, rateLimiter } = require("../lib/security");
 const { BODY_LIMIT, FileError, saveFile } = require("../lib/files");
 const { loadStandard, shownStandard } = require("../lib/standard");
 const { loadOff } = require("../lib/services");
+const { loadFee, shownFee } = require("../lib/fees");
 const { certificateNo } = require("../lib/standard");
 const { formatDay } = require("../lib/html");
 const record = require("../lib/record");
@@ -161,6 +162,15 @@ module.exports = function publicRoutes({ pool, secret, config, fetchImpl, notify
       const coverage = {};
       for (const name of SERVICE_NAMES) coverage[name] = name === OWN_CREW_SERVICE ? TIERS.slice() : TIERS.filter((tier) => rows.some((row) => row.trade === name && row.tier === tier));
       res.set("Cache-Control", "public, max-age=60").json(coverage);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The finder's fee rule as the For companies page and the Terms state it.
+  router.get("/fee", async (req, res, next) => {
+    try {
+      res.set("Cache-Control", "no-cache").json(shownFee(await loadFee(pool, config)));
     } catch (error) {
       next(error);
     }

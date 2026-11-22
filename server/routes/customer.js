@@ -4,6 +4,7 @@ const { formatDollars } = require("../lib/validate");
 const { requestRef, customerPath, isOwnerPreview, recordOpen } = require("../lib/links");
 const { LIMITS, listFiles, loadFile, sendFile, galleryHtml, pickerHtml } = require("../lib/files");
 const record = require("../lib/record");
+const { feeCents } = require("../lib/fees");
 
 const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the customer&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
@@ -317,8 +318,10 @@ ${filesSection(request, files)}`
       if (!request) return next();
       const quote = request.quotes.find((item) => String(item.id) === String(req.body.quote));
       if (quote && quote.status === "submitted" && request.status !== "chosen" && request.status !== "closed") {
-        await pool.query("update requests set status = 'chosen', chosen_quote_id = $1 where id = $2", [quote.id, request.id]);
-        notify("A customer chose " + quote.company, requestRef(request.id) + ": the customer chose " + quote.company + " (" + quote.tier + "). Their contact details are now on that company's page.");
+        await pool.query("update requests set status = 'chosen', chosen_quote_id = $1, chosen_at = now() where id = $2", [quote.id, request.id]);
+        const fee = feeCents(quote);
+        notify("A customer chose " + quote.company, requestRef(request.id) + ": the customer chose " + quote.company + " (" + quote.tier + "). Their contact details are now on that company's page." +
+          (fee ? " Fee to bill: " + formatDollars(fee) + ". The bill is ready under Fees in your dashboard." : ""));
       }
       res.redirect(303, customerPath(request));
     } catch (error) {

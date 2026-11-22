@@ -19,12 +19,14 @@
   <link rel="preload" href="fonts/alfa-slab-one-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="styles.css">
 
+  <script src="config.js" defer></script>
+  <script src="fee.js" defer></script>
 </head>
 <body>
   <header class="quote-head">
     <a class="brand" href="/" aria-label="AT Legacy Services, home"><img src="favicon.svg" alt="" width="44" height="44"><span class="brand-text" aria-hidden="true"><span class="brand-name">AT LEGACY</span><span class="brand-sub">SERVICES</span></span></a>
     <h1>Terms of use</h1>
-    <p>The plain rules for using this service. Last updated November 20, 2026.</p>
+    <p>The plain rules for using this service. Last updated November 21, 2026.</p>
   </header>
 
   <main class="quote-main read">
@@ -71,7 +73,11 @@
     <section class="read-part">
       <h2>For partner companies</h2>
       <ul class="read-points">
-        <li>There is no charge to apply, to receive a request, or to quote. You owe a finder&rsquo;s fee of 5% of the job total only on a job you win through us.</li>
+        <li>There is no charge to apply, to receive a request, or to quote. You owe a finder&rsquo;s fee only on a job a customer chooses you for through us.</li>
+        <li>The fee is <span data-fee="rule"><!--fee:rule--></span>. The terms shown on your quote page when you send a price are the ones that apply to that job.</li>
+        <li>We bill the fee after the customer chooses you. It is due <span data-fee="days"><!--fee:days--></span> days after that day.</li>
+        <li>If the job falls through before any work starts, tell us and no fee is owed.</li>
+        <li>No fee is owed on work that is paid for by a property insurance claim.</li>
         <li>What you put in a quote is your own offer to the customer, and you stand behind it.</li>
         <li>We can pause or end an approval when a company stops meeting our standard.</li>
       </ul>

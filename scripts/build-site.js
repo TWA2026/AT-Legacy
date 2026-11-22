@@ -13,6 +13,7 @@ const path = require("node:path");
 const { stampPage } = require("../server/lib/stamp");
 const business = require("../server/lib/business");
 const { DEFAULT_STANDARD, shownStandard, fillStandardPage } = require("../server/lib/standard");
+const { DEFAULT_FEE, shownFee, fillFeePage } = require("../server/lib/fees");
 
 const root = path.join(__dirname, "..");
 const out = path.join(root, "dist");
@@ -40,6 +41,21 @@ async function standardToShow() {
   return { shown: fallback, from: "the list in the code" };
 }
 
+// The fee rule written into the For companies page and the Terms, found the same way.
+async function feeToShow() {
+  try {
+    const response = await fetch(hub + "/api/fee", { signal: AbortSignal.timeout(4000) });
+    const shown = response.ok ? await response.json() : null;
+    const short = (text, max) => typeof text === "string" && text.length <= max;
+    if (shown && short(shown.percent, 8) && shown.percent && short(shown.rule, 120) && shown.rule && short(shown.limits, 120) && Number.isInteger(shown.days)) {
+      return { shown: { percent: shown.percent, rule: shown.rule, limits: shown.limits, days: shown.days }, from: "the hub" };
+    }
+  } catch (error) {
+    // Unreachable or slow: fall through to the rule in the code.
+  }
+  return { shown: shownFee(DEFAULT_FEE), from: "the rule in the code" };
+}
+
 (async () => {
   fs.rmSync(out, { recursive: true, force: true });
   fs.cpSync(path.join(root, "site"), out, { recursive: true });
@@ -49,11 +65,12 @@ async function standardToShow() {
   // Each page is filled from business.json (phone, About, and so on) and with the standard, then its files are fingerprinted.
   const details = business.load();
   const standard = await standardToShow();
+  const fee = await feeToShow();
   for (const file of fs.readdirSync(out).filter((name) => name.endsWith(".html"))) {
     const filled = fillStandardPage(business.fill(fs.readFileSync(path.join(out, file), "utf8"), details), standard.shown);
-    fs.writeFileSync(path.join(out, file), stampPage(filled, out));
+    fs.writeFileSync(path.join(out, file), stampPage(fillFeePage(filled, fee.shown), out));
   }
-  console.log("Built dist/ with the request API at " + hub + " and the standard from " + standard.from);
+  console.log("Built dist/ with the request API at " + hub + ", the standard from " + standard.from + ", and the fee from " + fee.from);
 })().catch((error) => {
   console.error(error);
   process.exit(1);

@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="styles.css">
   <script src="config.js" defer></script>
   <script src="partners.js" defer></script>
+  <script src="fee.js" defer></script>
 </head>
 <body>
   <header class="quote-head">
@@ -35,8 +36,8 @@
         <span>You never pay to see a request or to quote.</span>
       </li>
       <li>
-        <strong>5% finder&rsquo;s fee when you&rsquo;re hired</strong>
-        <span>Based on the job total, and only on jobs you win.</span>
+        <strong><span data-fee="percent"><!--fee:percent--></span> finder&rsquo;s fee when you&rsquo;re hired</strong>
+        <span>On the price you quote, and only on jobs you win. <span data-fee="limits"><!--fee:limits--></span> If a job falls through before work starts, you owe nothing.</span>
       </li>
       <li>
         <strong>One company per tier</strong>

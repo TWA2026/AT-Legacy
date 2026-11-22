@@ -5,6 +5,7 @@ const { page } = require("./lib/html");
 const { stampPage } = require("./lib/stamp");
 const business = require("./lib/business");
 const { DEFAULT_STANDARD, shownStandard, fillStandardPage } = require("./lib/standard");
+const { defaultFee, shownFee, fillFeePage } = require("./lib/fees");
 const { createNotifier } = require("./lib/notify");
 
 const SITE_DIR = path.join(__dirname, "..", "site");
@@ -130,7 +131,8 @@ function createApp({ pool, secret, config, fetchImpl = fetch }) {
     const sitePage = (file) => {
       if (!stampedPages.has(file)) {
         const filled = business.fill(fs.readFileSync(path.join(SITE_DIR, file), "utf8"), details);
-        stampedPages.set(file, stampPage(fillStandardPage(filled, shownStandard(DEFAULT_STANDARD)), SITE_DIR));
+        const withStandard = fillStandardPage(filled, shownStandard(DEFAULT_STANDARD));
+        stampedPages.set(file, stampPage(fillFeePage(withStandard, shownFee(defaultFee(config))), SITE_DIR));
       }
       return stampedPages.get(file);
     };

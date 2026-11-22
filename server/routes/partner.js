@@ -4,6 +4,7 @@ const { dollarsToCents, formatDollars } = require("../lib/validate");
 const { OWN_CREW_TIER } = require("../lib/catalog");
 const { requestRef, companyPath, isOwnerPreview, recordOpen } = require("../lib/links");
 const { listFiles, loadFile, sendFile, plainNames, galleryHtml } = require("../lib/files");
+const { ruleText, termsOf, feeCents, workingText, payUrl, dueDay, loadFee } = require("../lib/fees");
 
 const OWNER_NOTE = '<p class="owner-preview"><strong>Owner preview.</strong> This is the company&rsquo;s page, as they see it. Your visit isn&rsquo;t counted as them opening it.</p>';
 
@@ -15,7 +16,7 @@ async function loadQuote(pool, token) {
   const found = await pool.query(
     `select q.*, p.company,
             r.id as r_id, r.service, r.property, r.location, r.timing, r.size, r.brief, r.answers,
-            r.status as request_status, r.chosen_quote_id, r.name as customer_name, r.phone as customer_phone,
+            r.status as request_status, r.chosen_quote_id, r.chosen_at, r.name as customer_name, r.phone as customer_phone,
             r.email as customer_email, r.contact_method
        from quotes q
        join partners p on p.id = q.partner_id
@@ -97,7 +98,22 @@ function quoteForm(quote, error) {
     </form>`;
 }
 
-function render(quote, error, ownerPreview, files = []) {
+// What the company owes on a job it won, on the page it already uses, with a way to pay.
+function feeDue(quote, fee) {
+  const amount = feeCents(quote);
+  if (!amount) return "";
+  if (quote.fee_waived) return `<p class="form-note">There is no finder&rsquo;s fee on this job.</p>`;
+  if (quote.fee_paid) return `<p class="form-note">Your finder&rsquo;s fee of ${esc(formatDollars(amount))} is paid. Thank you.</p>`;
+  const due = dueDay(quote.chosen_at, fee.dueDays);
+  const link = payUrl(fee.payLink, requestRef(quote.r_id) + "-Q" + quote.id);
+  return `<div class="fee-due">
+        <h3>Your finder&rsquo;s fee is ${esc(formatDollars(amount))}</h3>
+        <p>${esc(workingText(quote))}.${due ? " It is due by " + esc(due) + "." : ""} If the job falls through before any work starts, <a class="plain-link" href="/contact">tell us</a> and you owe nothing.</p>
+        ${link ? `<p class="fee-pay"><a class="primary" href="${esc(link)}" rel="noopener">Pay the fee</a></p>` : "<p>We&rsquo;ll send you the bill.</p>"}
+      </div>`;
+}
+
+function render(quote, error, ownerPreview, files = [], fee = null) {
   const won = quote.chosen_quote_id === quote.id;
   const decided = quote.request_status === "chosen" || quote.request_status === "closed";
   const ownCrew = quote.tier === OWN_CREW_TIER;
@@ -114,6 +130,7 @@ function render(quote, error, ownerPreview, files = []) {
         <dt>Prefers</dt><dd>${esc(quote.contact_method)}</dd>
         <dt>Your quote</dt><dd>${esc(formatDollars(quote.amount_cents))}</dd>
       </dl>
+      ${ownCrew || !fee ? "" : feeDue(quote, fee)}
     </section>`;
   } else if (decided) {
     status = `<section class="app-section"><h2>This request is closed</h2><p>${quote.request_status === "chosen" ? "The customer chose another company." : "The customer is no longer collecting quotes."} Thanks for your time.</p></section>`;
@@ -126,7 +143,7 @@ function render(quote, error, ownerPreview, files = []) {
       <h2>Your quote</h2>
       ${note}
       ${quoteForm(quote, error)}
-      ${ownCrew ? "" : `<p class="form-note">If the customer hires you through this request, the finder&rsquo;s fee is ${esc(Number(quote.fee_percent))}% of the job total. You never pay for a quote that isn&rsquo;t chosen.</p>`}
+      ${ownCrew ? "" : `<p class="form-note">If the customer hires you through this request, the finder&rsquo;s fee is ${esc(ruleText(termsOf(quote)))}. You never pay for a quote that isn&rsquo;t chosen.</p>`}
     </section>`;
   }
 
@@ -148,7 +165,7 @@ function render(quote, error, ownerPreview, files = []) {
   });
 }
 
-module.exports = function partnerRoutes({ pool, notify = async () => false }) {
+module.exports = function partnerRoutes({ pool, config, notify = async () => false }) {
   const router = express.Router();
 
   // The name after the secret is only a label for people. The page opens with or without it.
@@ -157,7 +174,7 @@ module.exports = function partnerRoutes({ pool, notify = async () => false }) {
       const quote = await loadQuote(pool, req.params.token);
       if (!quote) return next();
       await recordOpen(pool, req, { requestId: quote.r_id, quoteId: quote.id });
-      res.send(render(quote, "", isOwnerPreview(req), await sharedFiles(pool, quote)));
+      res.send(render(quote, "", isOwnerPreview(req), await sharedFiles(pool, quote), await loadFee(pool, config)));
     } catch (error) {
       next(error);
     }

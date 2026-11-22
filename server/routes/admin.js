@@ -2,9 +2,10 @@ const express = require("express");
 const { esc, page, ownerPage, certificatePage, briefHtml, formatDate, formatDateTime, formatDay } = require("../lib/html");
 const { SEND_EVENTS, requestRef, customerPath, companyPath, loadActivity } = require("../lib/links");
 const { workbook } = require("../lib/xlsx");
-const { dollarsToCents, formatDollars } = require("../lib/validate");
+const { formatDollars } = require("../lib/validate");
 const { SERVICES, SERVICE_NAMES, TIERS, OWN_CREW_SERVICE, OWN_CREW_TIER, licenseCheck } = require("../lib/catalog");
 const { loadOff, saveLive } = require("../lib/services");
+const { FEE_SQL, checkFee, loadFee, saveFee, feeCents, ruleText, workingText, payUrl, dueDay } = require("../lib/fees");
 const { SHARING, LIMITS, megabytes, fileSize, listFiles, loadFile, storageUsed, sendFile, galleryHtml } = require("../lib/files");
 const {
   MAX_LABEL, MAX_POINTS, loadStandard, saveStandard, standardFromForm, possiblePoints, itemKey, metFromForm, scoreVisit,
@@ -62,7 +63,8 @@ function nextStep(r, quotes) {
     const company = chosen ? chosen.company : "A company";
     const hasFee = chosen && Number(chosen.fee_percent) > 0;
     let rest = "There is no fee on this one. Close the request when the job is done.";
-    if (hasFee) rest = chosen.fee_paid ? "The fee is marked paid. Close the request when you’re done with it." : "When the job is done, enter the final total under Fees.";
+    if (hasFee) rest = chosen.fee_paid ? "The fee is marked paid. Close the request when you’re done with it." : "Send the bill from Fees.";
+    if (hasFee && chosen.fee_waived) rest = "You waived the fee on this one. Close the request when the job is done.";
     return { needsYou: false, short: company + " was chosen", long: "The customer chose " + company + ". " + rest };
   }
   const unfilled = r.tiers.length - quotes.length;
@@ -317,9 +319,9 @@ module.exports = function adminRoutes({ pool, secret, config, fetchImpl }) {
       const now = today();
       const waiting = (await pool.query("select * from partners where status in ('applied', 'verified')")).rows.filter((p) => vendorStep(p, now).label).length;
       const owed = Number((await pool.query(
-        `select coalesce(sum(round(coalesce(q.final_amount_cents, q.amount_cents) * q.fee_percent / 100.0)), 0) as cents
+        `select coalesce(sum(${FEE_SQL}), 0) as cents
            from requests r join quotes q on q.id = r.chosen_quote_id
-          where q.fee_percent > 0 and not q.fee_paid`
+          where q.fee_percent > 0 and not q.fee_paid and not q.fee_waived`
       )).rows[0].cents);
       // Documents a customer added that no company can see until the owner decides.
       const toCheck = (await pool.query(
@@ -539,10 +541,12 @@ ${tiers}
       const partner = (await pool.query("select id from partners where id = $1 and status = 'verified'", [Number(req.body.partner) || 0])).rows[0];
       if (!request) return next();
       if (partner && request.tiers.includes(req.body.tier) && request.status !== "chosen" && request.status !== "closed") {
+        // The fee terms in force today travel with the brief. The owner's own crew owes no fee.
+        const fee = req.body.tier === OWN_CREW_TIER ? { percent: 0, minCents: 0, maxCents: 0 } : await loadFee(pool, config);
         await pool.query(
-          `insert into quotes (request_id, partner_id, tier, token, fee_percent) values ($1, $2, $3, $4, $5)
+          `insert into quotes (request_id, partner_id, tier, token, fee_percent, fee_min_cents, fee_max_cents) values ($1, $2, $3, $4, $5, $6, $7)
            on conflict (request_id, tier) do nothing`,
-          [id, partner.id, req.body.tier, newToken(), req.body.tier === OWN_CREW_TIER ? 0 : config.feePercent]
+          [id, partner.id, req.body.tier, newToken(), fee.percent, fee.minCents, fee.maxCents]
         );
         await pool.query("update requests set status = 'collecting' where id = $1 and status = 'new'", [id]);
       }
@@ -596,7 +600,7 @@ ${tiers}
       const count = async (table) => (await pool.query(`select count(*)::int as n from ${table} where request_id = $1`, [r.id])).rows[0].n;
       const [quotes, files, ratings] = [await count("quotes"), await count("request_files"), await count("ratings")];
       const chosen = r.chosen_quote_id
-        ? (await pool.query("select p.company, q.amount_cents, q.fee_percent from quotes q join partners p on p.id = q.partner_id where q.id = $1", [r.chosen_quote_id])).rows[0]
+        ? (await pool.query("select p.company, q.amount_cents, q.fee_percent, q.fee_min_cents, q.fee_max_cents from quotes q join partners p on p.id = q.partner_id where q.id = $1", [r.chosen_quote_id])).rows[0]
         : null;
       res.send(adminPage(req, {
         current: "requests", back: { href: "/admin/requests/" + r.id, label: "Back to the request" },
@@ -610,7 +614,7 @@ ${tiers}
         <li>${plural(files, "picture or file", "pictures and files")}</li>
         ${ratings ? "<li>The customer&rsquo;s rating</li>" : ""}
       </ul>
-      ${chosen ? `<p class="form-error">The customer chose ${esc(chosen.company)} for this job. Its finder&rsquo;s fee record (${esc(formatDollars(Math.round(chosen.amount_cents * chosen.fee_percent / 100)))}) goes too. If you still need that for your books, write it down first.</p>` : ""}
+      ${chosen ? `<p class="form-error">The customer chose ${esc(chosen.company)} for this job. Its finder&rsquo;s fee record (${esc(formatDollars(feeCents(chosen)))}) goes too. If you still need that for your books, write it down first.</p>` : ""}
       <form method="post" action="/admin/requests/${r.id}/delete" class="done-actions">
         ${csrfField}
         <button class="primary" type="submit" name="confirm" value="yes">Delete it for good</button>
@@ -1405,32 +1409,127 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
     }
   });
 
-  // Fees: one row per job a customer awarded to a partner.
+  // Fee settings: the one rule every new brief carries, and the owner's payment page.
+  const FEE_PAGE = { current: "fees", back: { href: "/admin/fees", label: "Back to fees" }, title: "Fee settings", heading: "Fee settings" };
+
+  function feeSettingsBody(fee, { error = "", saved = false, form = null } = {}) {
+    const shown = form || { percent: fee.percent, min: fee.minCents ? fee.minCents / 100 : "", max: fee.maxCents ? fee.maxCents / 100 : "", days: fee.dueDays, pay_link: fee.payLink };
+    const example = (label, cents) => `<li>${esc(label)}, quoted at ${esc(formatDollars(cents))}: <strong>${esc(formatDollars(feeCents({ amount_cents: cents, fee_percent: fee.percent, fee_min_cents: fee.minCents, fee_max_cents: fee.maxCents })))}</strong></li>`;
+    const field = (name, label, help, attrs) => `<div class="field">
+            <label for="${name}">${label}</label>
+            <input id="${name}" name="${name}" ${attrs} value="${esc(shown[name] === undefined ? "" : shown[name])}" aria-describedby="${name}-help">
+            <span class="help" id="${name}-help">${help}</span>
+          </div>`;
+    return `    ${saved ? '<p class="visit-result" role="status"><strong>Saved.</strong> Briefs you send from now on carry this rule. Jobs already sent keep the terms they had.</p>' : ""}
+    <form class="quote-form" method="post" action="/admin/fees/settings">
+      ${csrfField}
+      ${error ? `<p class="form-error" role="alert">${esc(error)}</p>` : ""}
+      <section class="form-part">
+        <h2>The rule</h2>
+        <p class="form-note">A company owes a fee only on a job the customer chose it for. The fee is a share of the price it quoted, with a floor for small jobs and a ceiling for big ones.</p>
+        <div class="fields">
+          ${field("percent", "Percent of the quoted price", "From 0.5 to 20.", 'type="text" inputmode="decimal" maxlength="5" required')}
+          ${field("min", "Smallest fee, in dollars", "What a small job pays. Leave empty for none.", 'type="text" inputmode="decimal" maxlength="6"')}
+          ${field("max", "Largest fee, in dollars", "What the biggest job pays. Leave empty for no limit.", 'type="text" inputmode="decimal" maxlength="8"')}
+          ${field("days", "Days to pay", "Counted from the day the customer chooses.", 'type="text" inputmode="numeric" maxlength="2" required')}
+        </div>
+      </section>
+      <section class="form-part">
+        <h2>Your payment link</h2>
+        <p class="form-note">Paste the address of your payment page from Stripe, Square, or whichever service you use. Every bill carries it. With a Stripe link, each bill also adds the job number, so you can match a payment to its job.</p>
+        <div class="fields">
+          <div class="field wide">
+            <label for="pay_link">Payment link <span class="optional">(optional)</span></label>
+            <input id="pay_link" name="pay_link" type="url" inputmode="url" maxlength="300" placeholder="https://" value="${esc(shown.pay_link || "")}">
+          </div>
+        </div>
+      </section>
+      <button class="primary" type="submit">Save the fee settings</button>
+    </form>
+    <section class="app-section owner-after">
+      <h2>What that comes to</h2>
+      <p class="form-note">With the rule as saved: ${esc(ruleText(fee, "the quoted price"))}.</p>
+      <ul class="scope">
+        ${example("A cleaning visit", 12000)}
+        ${example("A fence", 640000)}
+        ${example("A paver patio", 1400000)}
+        ${example("A pool", 7000000)}
+      </ul>
+    </section>`;
+  }
+
+  router.get("/fees/settings", async (req, res, next) => {
+    try {
+      res.send(adminPage(req, { ...FEE_PAGE, intro: "One rule for every size of job, and the page companies pay you on.", body: feeSettingsBody(await loadFee(pool, config), { saved: req.query.saved === "1" }) }));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/fees/settings", async (req, res, next) => {
+    try {
+      const { fee, problem } = checkFee(req.body);
+      if (problem) {
+        return res.status(400).send(adminPage(req, { ...FEE_PAGE, intro: "One rule for every size of job, and the page companies pay you on.", body: feeSettingsBody(await loadFee(pool, config), { error: problem, form: req.body }) }));
+      }
+      await saveFee(pool, fee);
+      res.redirect(303, "/admin/fees/settings?saved=1");
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // The bill for one won job: words the owner can copy, text, or email, with the payment link on the end.
+  function billBlock(job, amount, due, fee) {
+    const ref = requestRef(job.r_id);
+    const link = payUrl(fee.payLink, ref + "-Q" + job.id);
+    const words = "AT Legacy Services: the finder’s fee for job " + ref + " (" + job.service + ") is " + formatDollars(amount) + (due ? ", due by " + due : "") + "." + (link ? " Pay here:" : "");
+    const whole = words + (link ? " " + link : "");
+    const who = firstName(job.contact_name) || job.company;
+    const sms = textLink(job.partner_phone, whole);
+    const mail = emailLink(job.partner_email, "AT Legacy Services fee, " + ref + ", " + formatDollars(amount), words + (link ? "\n\n" + link : ""));
+    const actions = [`<li><button class="text-button" type="button" data-copy-text="${esc(whole)}">Copy the bill</button></li>`];
+    if (sms) actions.push(`<li><a href="${esc(sms)}">Text it to ${esc(who)}</a></li>`);
+    if (mail) actions.push(`<li><a href="${esc(mail)}">Email it to ${esc(who)}</a></li>`);
+    if (link) actions.push(`<li><a href="${esc(link)}" target="_blank" rel="noopener">Open the payment page</a></li>`);
+    return `<div class="link-row bill">
+              <p class="link-name">Bill to send</p>
+              <p class="bill-text">${esc(words)}${link ? ` <span class="bill-link">${esc(link)}</span>` : ""}</p>
+              ${link ? "" : '<p class="link-note">Add your payment link in <a class="plain-link" href="/admin/fees/settings">Fee settings</a> and every bill will carry it.</p>'}
+              <ul class="link-actions">${actions.join("")}</ul>
+            </div>`;
+  }
+
+  // Fees: one row per job a customer awarded to a partner. Each one still owed carries a bill ready to send.
   router.get("/fees", async (req, res, next) => {
     try {
+      const fee = await loadFee(pool, config);
       const jobs = (await pool.query(
-        `select q.*, p.company, r.service, r.name as customer_name, r.id as r_id
+        `select q.*, p.company, p.contact_name, p.phone as partner_phone, p.email as partner_email,
+                r.service, r.name as customer_name, r.id as r_id, r.chosen_at
            from requests r
            join quotes q on q.id = r.chosen_quote_id
            join partners p on p.id = q.partner_id
           where q.fee_percent > 0
-          order by q.fee_paid, r.created_at desc`
+          order by (q.fee_paid or q.fee_waived), r.created_at desc`
       )).rows;
       let owed = 0;
       let paid = 0;
       const rows = jobs.map((job) => {
-        const total = Number(job.final_amount_cents || job.amount_cents);
-        const fee = Math.round(total * Number(job.fee_percent) / 100);
-        if (job.fee_paid) paid += fee; else owed += fee;
-        return `<li class="owner-row fee-row${job.fee_paid ? "" : " needs-you"}">
+        const amount = feeCents(job);
+        const open = !job.fee_paid && !job.fee_waived;
+        if (job.fee_paid) paid += amount; else if (open) owed += amount;
+        const due = dueDay(job.chosen_at, fee.dueDays);
+        const state = job.fee_waived ? "Waived" : job.fee_paid ? "Paid" : "Owed to you";
+        return `<li class="owner-row fee-row${open ? " needs-you" : ""}">
             <a class="owner-row-main" href="/admin/requests/${job.r_id}">${esc(job.service)} <span>for ${esc(job.customer_name)}</span></a>
-            <p class="owner-row-facts">${requestRef(job.r_id)}, ${esc(job.company)}<br>Quoted ${esc(formatDollars(job.amount_cents))} at ${esc(Number(job.fee_percent))}%</p>
-            <p class="owner-row-state"><strong class="fee-amount">${esc(formatDollars(fee))}</strong> <span>${job.fee_paid ? "Paid" : "Owed to you"}</span></p>
+            <p class="owner-row-facts">${requestRef(job.r_id)}, ${esc(job.company)}<br>${esc(workingText(job))}${open && due ? ". Due by " + esc(due) + "." : "."}</p>
+            <p class="owner-row-state"><strong class="fee-amount${job.fee_waived ? " fee-waived" : ""}">${esc(formatDollars(amount))}</strong> <span>${state}</span></p>
+            ${open ? billBlock(job, amount, due, fee) : ""}
             <form method="post" action="/admin/fees/${job.id}" class="fee-form">
               ${csrfField}
-              <label for="final-${job.id}">Final job total</label>
-              <input id="final-${job.id}" name="final" type="text" inputmode="decimal" maxlength="14" value="${esc(formatDollars(job.final_amount_cents))}" placeholder="${esc(formatDollars(job.amount_cents))}">
               <label class="choice"><input type="checkbox" name="paid"${job.fee_paid ? " checked" : ""}> <span>Fee paid</span></label>
+              <label class="choice"><input type="checkbox" name="waived"${job.fee_waived ? " checked" : ""}> <span>No fee on this job</span></label>
               <button class="secondary" type="submit">Save</button>
             </form>
           </li>`;
@@ -1440,10 +1539,11 @@ ${messages.map((m) => `      <li class="message${m.handled ? "" : " needs-you"}"
         title: "Fees",
         heading: "Finder’s fees",
         intro: "Owed to you now: " + formatDollars(owed) + ". Collected so far: " + formatDollars(paid) + ".",
-        body: `    <p class="form-note owner-lead">One row for each job a customer awarded. The fee uses the final job total when you enter one, and the quoted price until then.</p>
+        body: `    <p class="form-note owner-lead">Your fee is ${esc(ruleText(fee, "the quoted price"))}, owed only when a customer chooses the company. <a class="plain-link" href="/admin/fees/settings">Fee settings</a></p>
+    ${fee.payLink ? "" : '<p class="owner-next needs-you">You haven&rsquo;t added a payment link yet. <a class="plain-link" href="/admin/fees/settings">Add it in Fee settings</a> and each bill will carry it.</p>'}
     ${rows ? `<ul class="owner-list">
 ${rows}
-    </ul>` : '<p class="owner-empty">No jobs have been awarded yet. A job shows up here when a customer chooses a company.</p>'}`
+    </ul>` : '<p class="owner-empty">No jobs have been awarded yet. A job shows up here when a customer chooses a company, with a bill ready to send.</p>'}`
       }));
     } catch (error) {
       next(error);
@@ -1597,13 +1697,12 @@ ${rows}
           ],
           rows: all.map((item) => {
             const won = item.chosen;
-            const total = won ? Number(won.final_amount_cents || won.amount_cents) : null;
             const percent = won ? Number(won.fee_percent) : null;
             return [
               { text: item.ref, url: item.page }, item.r.created_at, item.r.service,
               item.r.name, item.r.phone, item.r.location, STATUS_LABELS[item.r.status],
               won ? won.company : "", won ? won.amount_cents : null, won ? won.final_amount_cents : null,
-              won ? percent : null, won ? Math.round(total * percent / 100) : null, won && percent > 0 ? (won.fee_paid ? "Yes" : "No") : ""
+              won ? percent : null, won ? feeCents(won) : null, won && percent > 0 ? (won.fee_waived ? "Waived" : won.fee_paid ? "Yes" : "No") : ""
             ];
           })
         }
@@ -1652,14 +1751,11 @@ ${rows}
     }));
   });
 
+  // One won job's fee: paid, or waived (the job fell through, or the owner chose not to charge).
   router.post("/fees/:id", async (req, res, next) => {
     try {
-      const final = String(req.body.final || "").trim();
-      const cents = final ? dollarsToCents(final) : null;
-      if (final && !cents) {
-        return res.status(400).send(adminPage(req, { current: "fees", back: { href: "/admin/fees", label: "Back to fees" }, title: "Fees", heading: "That amount didn’t work", body: '    <p>Enter the final job total as a dollar amount, like 5200 or 5,200.00.</p>' }));
-      }
-      await pool.query("update quotes set final_amount_cents = $1, fee_paid = $2 where id = $3", [cents, Boolean(req.body.paid), Number(req.params.id) || 0]);
+      const waived = Boolean(req.body.waived);
+      await pool.query("update quotes set fee_paid = $1, fee_waived = $2 where id = $3", [Boolean(req.body.paid) && !waived, waived, Number(req.params.id) || 0]);
       res.redirect(303, "/admin/fees");
     } catch (error) {
       next(error);
