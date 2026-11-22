@@ -903,6 +903,11 @@ html {
   color: var(--slate);
 }
 
+/* A figure filled in from the fee rule reads as part of the words around it. */
+.partner-terms [data-fee] {
+  color: inherit;
+}
+
 .partner-jump {
   margin: 0 0 52px;
 }
